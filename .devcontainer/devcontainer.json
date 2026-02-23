@@ -1,0 +1,8 @@
+{
+    "name": "Omnia CLI",
+    "image": "mcr.microsoft.com/devcontainers/python:3.12",
+    "features": {
+        "ghcr.io/devcontainers/features/common-utils:2": {}
+    },
+    "postCreateCommand": "pip install -r requirements.txt"
+}
