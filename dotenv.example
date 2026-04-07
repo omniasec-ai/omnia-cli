@@ -1,0 +1,7 @@
+# Your Omnia API key — the only credential you need to set
+OMNIA_API_TOKEN=your_api_key_here
+
+# Optional overrides:
+# OMNIA_ENV=prod          → https://api.omniasec.ai  (default in Docker image)
+# OMNIA_ENV=dev           → http://localhost:8000     (default in docker-compose)
+# OMNIA_API_URL=https://… → explicit URL override (staging, custom deploys)

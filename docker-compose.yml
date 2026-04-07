@@ -1,0 +1,15 @@
+services:
+  omnia:
+    build: .
+    image: omnia-cli
+    env_file:
+      - .env
+    environment:
+      # Override to dev so it hits localhost:8000 instead of api.omniasec.ai
+      OMNIA_ENV: prod
+    # Mount host config dir so credentials persist between runs
+    volumes:
+      - ${HOME}/.omnia:/root/.omnia
+    # Keep stdin open for the interactive REPL
+    stdin_open: true
+    tty: true
