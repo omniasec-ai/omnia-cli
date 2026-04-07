@@ -20,10 +20,25 @@ _VERDICT_COLOR = {
 }
 
 
+def _unwrap_content(content: str) -> str:
+    """
+    The API sometimes stores content as a JSON object {"text": "...", "provider": "..."}.
+    Extract the actual text string in that case.
+    """
+    if content and content.strip().startswith("{"):
+        try:
+            data = json.loads(content)
+            if isinstance(data, dict) and "text" in data:
+                return data["text"]
+        except Exception:
+            pass
+    return content
+
+
 def render_message(msg: dict) -> None:
     """Dispatch a stored message dict to the correct renderer."""
     component_type = msg.get("component_type", "assistant")
-    content = msg.get("content", "")
+    content = _unwrap_content(msg.get("content", ""))
 
     if component_type == "user":
         _render_user(content)

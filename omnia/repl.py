@@ -19,11 +19,9 @@ COMMANDS THAT REQUIRE LOGIN
   /project create <name>            Create a new project
   /project delete <id>              Delete a project
 
-  /chat                             Create a new project and start chatting
-  /chat <project_id>                Switch to an existing project's chat
   /new <name>                       Create a project with this name and switch
-  /resume                           Pick a recent chat and continue the conversation
-  /leave                            Leave the current chat (keeps CLI open)
+  /chats  /resume                   Pick a recent chat with arrow keys and enter it
+  /leave  /back                     Leave the current chat (keeps CLI open)
   /history                          Show this chat's message history
 
   /analysis                         List your file analyses
@@ -55,7 +53,11 @@ from __future__ import annotations
 
 import base64
 import os
+import select
 import shlex
+import sys
+import termios
+import tty
 from pathlib import Path
 from typing import Optional
 
@@ -116,10 +118,11 @@ _COMPLETIONS = [
     "/projects",
     "/project create",
     "/project delete",
-    "/chat",
     "/new",
+    "/chats",
     "/resume",
     "/leave",
+    "/back",
     "/history",
     "/analysis",
     "/analysis upload",
@@ -142,6 +145,200 @@ _COMPLETIONS = [
 _PT_STYLE = Style.from_dict({"prompt": "ansicyan bold"})
 
 _VERDICT_COLOR = {"malicious": "red", "risky": "yellow", "undetected": "green"}
+
+# ---------------------------------------------------------------------------
+# Model helpers  (mirrors omnia-frontend ModelDropdown / SettingsContext)
+# ---------------------------------------------------------------------------
+
+
+def _models_from_settings(user_settings: dict) -> list[dict]:
+    """
+    Build the selectable model list from the user's last_settings payload,
+    replicating the frontend logic:
+      - only providers that have a non-empty api_key var (or don't require one)
+      - only models flagged as enabled
+    Returns a list of {"label", "model", "provider"} dicts.
+    """
+    result: list[dict] = []
+    for provider in user_settings.get("llm_providers", []):
+        has_key = any(
+            v.get("var_name") == "api_key"
+            and ((v.get("required") and v.get("var_value")) or not v.get("required"))
+            for v in provider.get("vars", [])
+        )
+        if not has_key:
+            continue
+        for model in provider.get("models", []):
+            if model.get("enabled"):
+                result.append(
+                    {
+                        "label": model.get("title") or model["internal_name"],
+                        "model": model["internal_name"],
+                        "provider": provider["internal_name"],
+                    }
+                )
+    return result
+
+
+def _model_picker(models: list[dict], current_model: str) -> dict | None:
+    """
+    Interactive arrow-key model selector rendered directly to the terminal.
+    Returns the chosen model dict, or None if the user cancelled (Ctrl-C / q).
+    """
+    # ── Build display structure ──────────────────────────────────────────
+    providers_order: list[str] = []
+    by_provider: dict[str, list[tuple[int, dict]]] = {}
+    for i, m in enumerate(models):
+        p = m["provider"]
+        if p not in by_provider:
+            providers_order.append(p)
+            by_provider[p] = []
+        by_provider[p].append((i, m))
+
+    # flat list of (model_index | None, display_text)
+    lines: list[tuple[int | None, str]] = []
+    for p in providers_order:
+        lines.append((None, p.upper()))
+        for model_idx, m in by_provider[p]:
+            lines.append((model_idx, m["label"]))
+
+    # indices into `lines` that correspond to selectable models
+    selectable: list[int] = [i for i, (midx, _) in enumerate(lines) if midx is not None]
+
+    # position within `selectable`
+    cur_idx = next(
+        (
+            si
+            for si, li in enumerate(selectable)
+            if lines[li][0]
+            == next((i for i, m in enumerate(models) if m["model"] == current_model), 0)
+        ),
+        0,
+    )
+
+    def _line_str(line_i: int) -> str:
+        midx, label = lines[line_i]
+        if midx is None:
+            # provider header
+            return f"\x1b[2m  {label}\x1b[0m"
+        if line_i == selectable[cur_idx]:
+            return f"\x1b[1;36m❯ {label}\x1b[0m"
+        return f"  {label}"
+
+    def _render(first: bool = False) -> None:
+        if not first:
+            sys.stdout.write(f"\x1b[{len(lines)}A")
+        for i in range(len(lines)):
+            sys.stdout.write(f"\x1b[2K\r{_line_str(i)}\n")
+        sys.stdout.flush()
+
+    sys.stdout.write("\n")
+    _render(first=True)
+
+    fd = sys.stdin.fileno()
+    old_attrs = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        while True:
+            # Use os.read to bypass Python's TextIOWrapper buffer so that
+            # select() reliably sees pending bytes after reading \x1b.
+            ch = os.read(fd, 1)
+
+            if ch in (b"\x03", b"q"):  # Ctrl-C or q → cancel
+                return None
+            elif ch in (b"\r", b"\n"):  # Enter → confirm
+                model_idx = lines[selectable[cur_idx]][0]
+                return models[model_idx]  # type: ignore[index]
+            elif ch == b"\x1b":  # possible escape sequence
+                r, _, _ = select.select([fd], [], [], 0.05)
+                if not r:
+                    return None  # lone Escape → cancel
+                rest = os.read(fd, 2)
+                if rest == b"[A":  # ↑
+                    cur_idx = (cur_idx - 1) % len(selectable)
+                    _render()
+                elif rest == b"[B":  # ↓
+                    cur_idx = (cur_idx + 1) % len(selectable)
+                    _render()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+
+def _chat_picker(projects: list[dict], window: int = 5) -> dict | None:
+    """
+    Arrow-key picker with a scrolling window of `window` visible items.
+    Returns the chosen project dict, or None if cancelled.
+    """
+    from datetime import datetime
+
+    def _fmt(p: dict) -> str:
+        name = p.get("name", "(unnamed)")
+        updated = p.get("updated_at") or p.get("created_at") or ""
+        try:
+            dt = datetime.fromisoformat(str(updated).replace("Z", "+00:00"))
+            date_str = dt.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            date_str = ""
+        unread = p.get("unread_messages") or 0
+        badge = f" [{unread}]" if unread else ""
+        suffix = f"  \x1b[2m{date_str}{badge}\x1b[0m" if date_str else ""
+        return f"{name}{suffix}"
+
+    n = len(projects)
+    visible = min(window, n)
+    cur_idx = 0  # index into projects (absolute)
+    win_start = 0  # first visible index
+
+    def _render(first: bool = False) -> None:
+        if not first:
+            sys.stdout.write(f"\x1b[{visible}A")
+        for row, i in enumerate(range(win_start, win_start + visible)):
+            sys.stdout.write("\x1b[2K\r")
+            label = _fmt(projects[i])
+            if i == cur_idx:
+                sys.stdout.write(f"\x1b[1;36m❯ {label}\x1b[0m\n")
+            else:
+                sys.stdout.write(f"  {label}\n")
+        sys.stdout.flush()
+
+    sys.stdout.write("\n")
+    _render(first=True)
+
+    fd = sys.stdin.fileno()
+    old_attrs = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        while True:
+            ch = os.read(fd, 1)
+            if ch in (b"\x03", b"q"):
+                return None
+            elif ch in (b"\r", b"\n"):
+                return projects[cur_idx]
+            elif ch == b"\x1b":
+                r, _, _ = select.select([fd], [], [], 0.05)
+                if not r:
+                    return None
+                rest = os.read(fd, 2)
+                if rest == b"[A":  # ↑
+                    cur_idx = (cur_idx - 1) % n
+                    if cur_idx < win_start:
+                        win_start = cur_idx
+                    elif cur_idx == n - 1:  # wrapped to bottom
+                        win_start = n - visible
+                    _render()
+                elif rest == b"[B":  # ↓
+                    cur_idx = (cur_idx + 1) % n
+                    if cur_idx >= win_start + visible:
+                        win_start = cur_idx - visible + 1
+                    elif cur_idx == 0:  # wrapped to top
+                        win_start = 0
+                    _render()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+        sys.stdout.write("\n")
+        sys.stdout.flush()
 
 
 class OmniaREPL:
@@ -263,16 +460,13 @@ class OmniaREPL:
             elif cmd == "/project":
                 self._require_auth()
                 self._cmd_project(args)
-            elif cmd == "/chat":
-                self._require_auth()
-                self._cmd_chat(args)
             elif cmd == "/new":
                 self._require_auth()
                 self._cmd_new(args)
-            elif cmd == "/resume":
+            elif cmd in ("/chats", "/resume"):
                 self._require_auth()
-                self._cmd_resume()
-            elif cmd == "/leave":
+                self._cmd_chats()
+            elif cmd in ("/leave", "/back"):
                 self._cmd_leave()
             elif cmd == "/history":
                 self._require_auth()
@@ -495,33 +689,6 @@ class OmniaREPL:
         else:
             console.print("[dim]Usage:[/dim]  /project create <name>  |  /project delete <id>")
 
-    def _cmd_chat(self, args: list[str]) -> None:
-        if args:
-            project_id = args[0]
-            with console.status("[dim]Loading…[/dim]"):
-                all_projects = projects_client.list_projects(self.user_id)
-            project = next((p for p in all_projects if p["id"] == project_id), None)
-            if not project:
-                console.print(f"[red]Project {project_id!r} not found.[/red]")
-                return
-            chat = projects_client.get_or_create_chat(self.user_id, project_id)
-            self.project = project
-            self.chat = chat
-            console.print(
-                f"[green]Switched to[/green] [bold]{project.get('name')}[/bold]  "
-                f"[dim]({project_id})[/dim]"
-            )
-        else:
-            name = _prompt_default("New project name", "Omnia session")
-            with console.status(f"[dim]Creating [cyan]{name}[/cyan]…[/dim]"):
-                project, chat = projects_client.create_project_with_chat(self.user_id, name)
-            self.project = project
-            self.chat = chat
-            console.print(
-                f"[green]Ready:[/green] [bold]{name}[/bold]  "
-                f"[dim]Start typing to send a message.[/dim]"
-            )
-
     def _cmd_new(self, args: list[str]) -> None:
         name = " ".join(args) if args else _prompt_default("Project name", "New project")
         with console.status(f"[dim]Creating [cyan]{name}[/cyan]…[/dim]"):
@@ -542,83 +709,49 @@ class OmniaREPL:
         self.chat = None
         console.print(
             f"[dim]Left[/dim] [bold]{name}[/bold][dim]. "
-            "Use [bold cyan]/chat[/bold cyan], [bold cyan]/new[/bold cyan] "
-            "or [bold cyan]/resume[/bold cyan] to start another.[/dim]"
+            "Use [bold cyan]/chats[/bold cyan] or [bold cyan]/new[/bold cyan] to start another.[/dim]"
         )
 
-    def _cmd_resume(self) -> None:
-        with console.status("[dim]Loading recent chats…[/dim]"):
-            all_projects = projects_client.list_projects(self.user_id, limit=20)
+    def _cmd_chats(self) -> None:
+        with console.status("[dim]Loading chats…[/dim]"):
+            projects = projects_client.list_projects(self.user_id, limit=50)
 
-        if not all_projects:
-            console.print("[yellow]No projects found.[/yellow]")
+        if not projects:
+            console.print("[yellow]No chats found.[/yellow]")
             return
 
         # Sort by most recently updated
-        def _updated_key(p: dict) -> str:
-            return p.get("updated_at") or p.get("created_at") or ""
+        projects.sort(
+            key=lambda p: p.get("updated_at") or p.get("created_at") or "",
+            reverse=True,
+        )
 
-        recent = sorted(all_projects, key=_updated_key, reverse=True)[:10]
-
-        from datetime import datetime
-        from rich.table import Table as _Table
-
-        t = _Table(title="Recent chats", show_lines=False, highlight=True)
-        t.add_column("#", style="bold cyan", justify="right", no_wrap=True)
-        t.add_column("Project", style="bold white")
-        t.add_column("Updated", style="dim")
-        t.add_column("ID", style="dim", no_wrap=True, max_width=36)
-
-        for i, p in enumerate(recent, start=1):
-            updated = p.get("updated_at") or p.get("created_at") or ""
-            try:
-                dt = datetime.fromisoformat(str(updated).replace("Z", "+00:00"))
-                updated_str = dt.strftime("%Y-%m-%d %H:%M")
-            except Exception:
-                updated_str = str(updated) if updated else "-"
-            t.add_row(str(i), p.get("name", ""), updated_str, p.get("id", ""))
-
-        console.print(t)
-
-        raw = _prompt_default(f"Choose [1-{len(recent)}] (Enter to cancel)").strip()
-        if not raw:
+        chosen = _chat_picker(projects)
+        if not chosen:
             console.print("[dim]Cancelled.[/dim]")
             return
 
-        try:
-            idx = int(raw) - 1
-            if not (0 <= idx < len(recent)):
-                raise ValueError
-        except ValueError:
-            console.print("[red]Invalid selection.[/red]")
-            return
-
-        chosen = recent[idx]
         project_id = chosen["id"]
-
-        with console.status("[dim]Loading chat…[/dim]"):
+        with console.status("[dim]Loading…[/dim]"):
             chat = projects_client.get_or_create_chat(self.user_id, project_id)
 
         self.project = chosen
         self.chat = chat
 
-        console.print(
-            f"[green]Resumed:[/green] [bold]{chosen.get('name')}[/bold]  "
-            f"[dim]Type a message to continue.[/dim]"
-        )
-
-        # Show the last few messages for context
+        # Show full history
         with console.status("[dim]Loading history…[/dim]"):
             msgs = messages_client.list_messages(self.user_id, project_id, chat["id"])
 
         if msgs:
-            last_msgs = msgs[-6:]
             console.print()
-            console.print("[dim]─── recent messages ───[/dim]")
-            for msg in last_msgs:
+            for msg in msgs:
                 render_message(msg)
-            console.print("[dim]───────────────────────[/dim]")
             console.print()
+        else:
+            console.print(
+                f"\n[green]Entered:[/green] [bold]{chosen.get('name')}[/bold]  "
+                "[dim]No messages yet. Start typing.[/dim]\n"
+            )
 
     def _cmd_history(self) -> None:
         with console.status("[dim]Loading messages…[/dim]"):
@@ -739,11 +872,30 @@ class OmniaREPL:
     # ------------------------------------------------------------------
 
     def _cmd_model(self, args: list[str]) -> None:
-        if not args:
-            console.print(f"[dim]Current model:[/dim] [bold]{self.model}[/bold]")
-        else:
+        if args:
+            # Direct set: /model <name>
             self.model = args[0]
             console.print(f"[green]Model:[/green] [bold]{self.model}[/bold]")
+            return
+
+        models = _models_from_settings(self.user_settings)
+        if not models:
+            console.print(
+                "[yellow]No models available.[/yellow]  "
+                "Make sure you are logged in and have at least one provider configured."
+            )
+            return
+
+        selected = _model_picker(models, self.model)
+        if selected:
+            self.model = selected["model"]
+            self.provider = selected["provider"]
+            console.print(
+                f"[green]✓ Model:[/green] [bold]{selected['label']}[/bold]  "
+                f"[dim]({selected['provider']})[/dim]"
+            )
+        else:
+            console.print(f"[dim]Cancelled — model unchanged:[/dim] [bold]{self.model}[/bold]")
 
     def _cmd_provider(self, args: list[str]) -> None:
         if not args:
