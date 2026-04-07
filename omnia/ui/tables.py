@@ -22,7 +22,7 @@ def _fmt_date(value: Any) -> str:
 
 
 def projects_table(projects: list[dict]) -> Table:
-    t = Table(title="Projects", show_lines=False, highlight=True)
+    t = Table(title="Chats", show_lines=False, highlight=True)
     t.add_column("ID", style="dim cyan", no_wrap=True, max_width=36)
     t.add_column("Name", style="bold white")
     t.add_column("Unread", style="yellow", justify="right")

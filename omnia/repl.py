@@ -15,12 +15,9 @@ COMMANDS THAT REQUIRE LOGIN
   /logout                           Clear credentials
   /me                               Show current user
 
-  /projects                         List all projects
-  /project create <name>            Create a new project
-  /project delete <id>              Delete a project
-
-  /new <name>                       Create a project with this name and switch
+  /new <name>                       Create a new chat
   /chats  /resume                   Pick a recent chat with arrow keys and enter it
+  /delete                           Delete the current chat
   /leave  /back                     Leave the current chat (keeps CLI open)
   /history                          Show this chat's message history
 
@@ -32,8 +29,8 @@ COMMANDS THAT REQUIRE LOGIN
   /template show <id>               Show template detail
   /template fork <id>               Fork a template to your account
 
-  /resources                        List resources in current project
-  /upload <file>                    Upload a file as a project resource
+  /resources                        List resources in current chat
+  /upload <file>                    Upload a file as a resource
 
   /agents                           List available agents
   /model [name]                     Show / change LLM model
@@ -114,10 +111,8 @@ _COMPLETIONS = [
     "/login",
     "/logout",
     "/me",
-    "/projects",
-    "/project create",
-    "/project delete",
     "/new",
+    "/delete",
     "/chats",
     "/resume",
     "/leave",
@@ -452,18 +447,15 @@ class OmniaREPL:
             elif cmd == "/agents":
                 self._require_auth()
                 self._cmd_agents()
-            elif cmd == "/projects":
-                self._require_auth()
-                self._cmd_projects()
-            elif cmd == "/project":
-                self._require_auth()
-                self._cmd_project(args)
             elif cmd == "/new":
                 self._require_auth()
                 self._cmd_new(args)
             elif cmd in ("/chats", "/resume"):
                 self._require_auth()
                 self._cmd_chats()
+            elif cmd == "/delete":
+                self._require_auth()
+                self._cmd_delete()
             elif cmd in ("/leave", "/back"):
                 self._cmd_leave()
             elif cmd == "/history":
@@ -645,48 +637,8 @@ class OmniaREPL:
         else:
             console.print("[yellow]No agents found.[/yellow]")
 
-    def _cmd_projects(self) -> None:
-        with console.status("[dim]Loading…[/dim]"):
-            projects = projects_client.list_projects(self.user_id)
-        if projects:
-            console.print(projects_table(projects))
-        else:
-            console.print("[yellow]No projects yet.[/yellow]")
-
-    def _cmd_project(self, args: list[str]) -> None:
-        sub = args[0].lower() if args else ""
-        rest = args[1:]
-
-        if sub == "create":
-            name = " ".join(rest) if rest else _prompt_default("Project name", "New project")
-            with console.status(f"[dim]Creating [cyan]{name}[/cyan]…[/dim]"):
-                project, chat = projects_client.create_project_with_chat(self.user_id, name)
-            self.project = project
-            self.chat = chat
-            console.print(
-                f"[green]Created:[/green] [bold]{name}[/bold]  [dim]({project['id']})[/dim]"
-            )
-
-        elif sub == "delete":
-            if not rest:
-                console.print("[red]Usage: /project delete <id>[/red]")
-                return
-            pid = rest[0]
-            confirm = _prompt_default(f"Delete project {pid!r}? [y/N]", "n")
-            if confirm.lower() not in ("y", "yes"):
-                console.print("[dim]Cancelled.[/dim]")
-                return
-            projects_client.delete_project(self.user_id, pid)
-            if self.project and self.project.get("id") == pid:
-                self.project = None
-                self.chat = None
-            console.print(f"[green]Deleted {pid}.[/green]")
-
-        else:
-            console.print("[dim]Usage:[/dim]  /project create <name>  |  /project delete <id>")
-
     def _cmd_new(self, args: list[str]) -> None:
-        name = " ".join(args) if args else _prompt_default("Project name", "New project")
+        name = " ".join(args) if args else _prompt_default("Chat name", "New chat")
         with console.status(f"[dim]Creating [cyan]{name}[/cyan]…[/dim]"):
             project, chat = projects_client.create_project_with_chat(self.user_id, name)
         self.project = project
@@ -695,6 +647,21 @@ class OmniaREPL:
             f"[green]Created:[/green] [bold]{name}[/bold]  "
             "[dim]Start typing to send a message.[/dim]"
         )
+
+    def _cmd_delete(self) -> None:
+        if not self.project:
+            console.print("[red]No active chat to delete.[/red]")
+            return
+        name = self.project.get("name", "")
+        pid = self.project["id"]
+        confirm = _prompt_default(f"Delete chat {name!r}? [y/N]", "n")
+        if confirm.lower() not in ("y", "yes"):
+            console.print("[dim]Cancelled.[/dim]")
+            return
+        projects_client.delete_project(self.user_id, pid)
+        self.project = None
+        self.chat = None
+        console.print(f"[green]Deleted[/green] [bold]{name}[/bold]")
 
     def _cmd_leave(self) -> None:
         if not self.project:
@@ -849,7 +816,7 @@ class OmniaREPL:
         if resources:
             console.print(resources_table(resources))
         else:
-            console.print("[dim]No resources in this project.[/dim]")
+            console.print("[dim]No resources in this chat.[/dim]")
 
     def _cmd_upload(self, args: list[str]) -> None:
         if not args:
@@ -925,7 +892,7 @@ class OmniaREPL:
         if not self.project or not self.chat:
             console.print(
                 "[yellow]No active chat.[/yellow]  "
-                "Run [cyan]/chat[/cyan] or [cyan]/new <name>[/cyan] to start one."
+                "Run [cyan]/chats[/cyan] or [cyan]/new <name>[/cyan] to start one."
             )
             return
 
