@@ -6,6 +6,7 @@ Usage:
     omnia chat --project <project_id>     # resume existing project
     omnia chat --new <name>               # create project with given name
 """
+
 from __future__ import annotations
 
 import typer
@@ -182,6 +183,7 @@ class ChatSession:
 
     def _cmd_me(self) -> None:
         from omnia.client.auth import get_me
+
         data = get_me()
         info = data.get("user_info", {})
         console.print(
@@ -253,9 +255,7 @@ class ChatSession:
         with console.status(f"Uploading [cyan]{file_path.name}[/cyan]…"):
             resource = upload_resource(self.user_id, self.project_id, file_path)
         resource_id = resource.get("id", "")
-        console.print(
-            f"[green]Uploaded.[/green] Resource ID: [cyan]{resource_id}[/cyan]"
-        )
+        console.print(f"[green]Uploaded.[/green] Resource ID: [cyan]{resource_id}[/cyan]")
 
     def _cmd_resources(self) -> None:
         resources = list_resources(self.user_id, self.project_id)
@@ -289,6 +289,7 @@ class ChatSession:
 # ---------------------------------------------------------------------------
 # Typer command
 # ---------------------------------------------------------------------------
+
 
 @app.callback(invoke_without_command=True)
 def chat(

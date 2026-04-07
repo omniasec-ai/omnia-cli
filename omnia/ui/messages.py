@@ -1,4 +1,5 @@
 """Renders chat messages from the API to the terminal."""
+
 from __future__ import annotations
 
 import base64
@@ -58,7 +59,7 @@ def _render_assistant(content: str) -> None:
     if _has_custom_tags(content):
         pos = 0
         for m in _RE_TAGS.finditer(content):
-            plain = content[pos:m.start()].strip()
+            plain = content[pos : m.start()].strip()
             if plain:
                 try:
                     console.print(Markdown(plain))
@@ -117,7 +118,9 @@ def _render_analysis(msg: dict) -> None:
         body.append(f"Risk score: {risk}/10\n", style="dim")
     if summary:
         body.append(f"\n{summary}")
-    console.print(Panel(body, title="[bold]Analysis Result[/bold]", border_style=color, expand=False))
+    console.print(
+        Panel(body, title="[bold]Analysis Result[/bold]", border_style=color, expand=False)
+    )
 
 
 def _render_workflow(msg: dict, component_type: str) -> None:
@@ -133,7 +136,14 @@ def _render_agent_launch(msg: dict) -> None:
 
 
 def _render_error(content: str) -> None:
-    console.print(Panel(content, title="[bold red]Error[/bold red]", border_style="red", expand=False))
+    console.print(
+        Panel(
+            content,
+            title="[bold red]Error[/bold red]",
+            border_style="red",
+            expand=False,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -141,28 +151,37 @@ def _render_error(content: str) -> None:
 # ---------------------------------------------------------------------------
 
 _KNOWN_TAGS = (
-    "tool", "agent", "think", "error", "grounding", "groundings",
-    "html_chart", "html_chart_no_download", "workflow_draft",
-    "memories", "info", "report",
+    "tool",
+    "agent",
+    "think",
+    "error",
+    "grounding",
+    "groundings",
+    "html_chart",
+    "html_chart_no_download",
+    "workflow_draft",
+    "memories",
+    "info",
+    "report",
 )
 _TAG_PAT = "|".join(_KNOWN_TAGS)
 
 # Matches full tags (<tag ...>content</tag>) and self-closing (<tag .../>)
 _RE_TAGS = re.compile(
-    rf'<({_TAG_PAT})\b([^>]*)>(.*?)</\1>|<({_TAG_PAT})\b([^>]*?)/>',
+    rf"<({_TAG_PAT})\b([^>]*)>(.*?)</\1>|<({_TAG_PAT})\b([^>]*?)/>",
     re.DOTALL,
 )
 _RE_ATTR = re.compile(r'(\w+)="([^"]*)"')
 
 _TOOL_ICONS: dict[str, str] = {
-    "code_execution": "⟩_",
+    "code_execution": ">_",
     "chart_generation": "📊",
     "google_web_search": "🔍",
     "web_search": "🔍",
     "read_file": "📄",
     "write_file": "✏",
-    "bash": "⟩_",
-    "python": "⟩_",
+    "bash": ">_",
+    "python": ">_",
 }
 
 
@@ -223,7 +242,7 @@ def _build_renderables(text: str) -> list[RenderableType]:
 
     pos = 0
     for m in _RE_TAGS.finditer(text):
-        plain = text[pos:m.start()].strip("\n\r")
+        plain = text[pos : m.start()].strip("\n\r")
         if plain.strip():
             renderables.append(Text(plain, style="dim white"))
         if m.group(1) is not None:
@@ -262,8 +281,13 @@ def _build_tag_renderable(tag: str, attrs_str: str, content: str) -> RenderableT
             if body:
                 body.append("\n")
             body.append(output, style="dim white")
-        return Panel(body, title=f"[bold cyan]{icon} {name}[/bold cyan]",
-                     border_style="cyan", expand=False, padding=(0, 1))
+        return Panel(
+            body,
+            title=f"[bold cyan]{icon} {name}[/bold cyan]",
+            border_style="cyan",
+            expand=False,
+            padding=(0, 1),
+        )
 
     if tag == "agent":
         name = attrs.get("name", "agent")
@@ -272,16 +296,25 @@ def _build_tag_renderable(tag: str, attrs_str: str, content: str) -> RenderableT
             return Text(f"◆ Running agent {name}…", style="dim")
         inner_renderables = _build_renderables(content.strip())
         inner = Group(*inner_renderables) if inner_renderables else Text("")
-        return Panel(inner, title=f"[bold magenta]◆ {name}[/bold magenta]",
-                     border_style="magenta", expand=False, padding=(0, 1))
+        return Panel(
+            inner,
+            title=f"[bold magenta]◆ {name}[/bold magenta]",
+            border_style="magenta",
+            expand=False,
+            padding=(0, 1),
+        )
 
     if tag == "think":
         stripped = content.strip()
         return Text(f"  ↳ {stripped}", style="dim italic") if stripped else None
 
     if tag == "error":
-        return Panel(content.strip(), title="[bold red]Error[/bold red]",
-                     border_style="red", expand=False)
+        return Panel(
+            content.strip(),
+            title="[bold red]Error[/bold red]",
+            border_style="red",
+            expand=False,
+        )
 
     if tag in ("grounding", "groundings"):
         uri = attrs.get("uri", "")
@@ -306,9 +339,13 @@ def _build_tag_renderable(tag: str, attrs_str: str, content: str) -> RenderableT
             except Exception:
                 pass
         label = f"{title} ({chart_type})" if title else chart_type
-        return Panel(Text("Chart cannot be rendered in the terminal.", style="dim"),
-                     title=f"[bold yellow]📊 {label}[/bold yellow]",
-                     border_style="yellow", expand=False, padding=(0, 1))
+        return Panel(
+            Text("Chart cannot be rendered in the terminal.", style="dim"),
+            title=f"[bold yellow]📊 {label}[/bold yellow]",
+            border_style="yellow",
+            expand=False,
+            padding=(0, 1),
+        )
 
     if tag == "workflow_draft":
         struct_b64 = attrs.get("struct", "")
@@ -325,13 +362,27 @@ def _build_tag_renderable(tag: str, attrs_str: str, content: str) -> RenderableT
         body.append(name, style="bold white")
         if description:
             body.append(f"\n{description}", style="dim")
-        return Panel(body, title="[bold green]▶ Workflow Draft[/bold green]",
-                     border_style="green", expand=False, padding=(0, 1))
+        return Panel(
+            body,
+            title="[bold green]▶ Workflow Draft[/bold green]",
+            border_style="green",
+            expand=False,
+            padding=(0, 1),
+        )
 
     if tag == "memories":
         output = content.strip()
-        return Panel(output, title="[dim]Memories[/dim]",
-                     border_style="dim", expand=False, padding=(0, 1)) if output else None
+        return (
+            Panel(
+                output,
+                title="[dim]Memories[/dim]",
+                border_style="dim",
+                expand=False,
+                padding=(0, 1),
+            )
+            if output
+            else None
+        )
 
     if tag == "report":
         report_id = attrs.get("report_id", "")
@@ -340,11 +391,15 @@ def _build_tag_renderable(tag: str, attrs_str: str, content: str) -> RenderableT
         info.append(f"ID: {report_id}", style="cyan")
         if timestamp:
             info.append(f"  •  {timestamp}", style="dim")
-        return Panel(info, title="[bold]📋 Report[/bold]",
-                     border_style="dim", expand=False, padding=(0, 1))
+        return Panel(
+            info,
+            title="[bold]📋 Report[/bold]",
+            border_style="dim",
+            expand=False,
+            padding=(0, 1),
+        )
 
     return None
-
 
 
 def _has_custom_tags(text: str) -> bool:
@@ -363,7 +418,7 @@ def _render_text_with_tags(text: str, *, inline: bool = False) -> bool:
     pos = 0
     found = False
     for m in _RE_TAGS.finditer(text):
-        plain = text[pos:m.start()].strip("\n\r")
+        plain = text[pos : m.start()].strip("\n\r")
         if plain.strip():
             console.print(plain, end="", highlight=False)
         # Group 1/2/3 → full form; Group 4/5 → self-closing
@@ -394,14 +449,14 @@ def render_streaming_chunk(chunk: dict, buffer: list[str]) -> None:
     delta = chunk.get("content", "")
     if isinstance(delta, dict):
         delta = delta.get("text", "")
-    
+
     is_partial = chunk.get("partial", True)
     accumulated = "".join(buffer)
     # Skip the final chunk if it's non-partial OR if it duplicates what we've already streamed
     if buffer and (not is_partial or delta == accumulated):
         buffer.append(delta)
         return
-        
+
     component_type = chunk.get("component_type", "assistant")
 
     if component_type in ("thinking",):
@@ -414,5 +469,5 @@ def render_streaming_chunk(chunk: dict, buffer: list[str]) -> None:
             # around tool tags and would produce blank lines
             if delta.strip():
                 console.print(delta, end="", highlight=False)
-    
+
     buffer.append(delta)

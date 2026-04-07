@@ -1,6 +1,7 @@
 """
 omnia project  — list / create / delete projects
 """
+
 from __future__ import annotations
 
 import typer
@@ -76,9 +77,7 @@ def delete(
 ) -> None:
     """Delete a project and all its chats."""
     if not yes:
-        typer.confirm(
-            f"Delete project {project_id!r} and all its data?", abort=True
-        )
+        typer.confirm(f"Delete project {project_id!r} and all its data?", abort=True)
     try:
         uid = _user_id()
         delete_project(uid, project_id)

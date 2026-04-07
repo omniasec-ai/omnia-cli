@@ -3,6 +3,7 @@ omnia — entry point.
 
 Launches the interactive REPL.
 """
+
 from __future__ import annotations
 
 from omnia.repl import OmniaREPL

@@ -1,6 +1,7 @@
 """
 omnia analysis  — upload files and inspect results
 """
+
 from __future__ import annotations
 
 import time
@@ -57,9 +58,7 @@ def list_cmd(
 @app.command("upload")
 def upload(
     file: Path = typer.Argument(..., help="File to analyse", exists=True),
-    watch: bool = typer.Option(
-        False, "--watch", "-w", help="Poll until analysis completes"
-    ),
+    watch: bool = typer.Option(False, "--watch", "-w", help="Poll until analysis completes"),
 ) -> None:
     """Upload a file for analysis."""
     try:
@@ -71,9 +70,7 @@ def upload(
         raise typer.Exit(code=1)
 
     analysis_id = result.get("id", "")
-    console.print(
-        f"[green]Uploaded.[/green] Analysis ID: [cyan]{analysis_id}[/cyan]"
-    )
+    console.print(f"[green]Uploaded.[/green] Analysis ID: [cyan]{analysis_id}[/cyan]")
 
     if watch and analysis_id:
         _poll_analysis(analysis_id)
@@ -101,9 +98,7 @@ def _poll_analysis(analysis_id: str, interval: int = 5, max_wait: int = 300) -> 
 @app.command("show")
 def show(
     analysis_id: str = typer.Argument(..., help="Analysis ID"),
-    children: bool = typer.Option(
-        False, "--children", "-c", help="Also show child analyses"
-    ),
+    children: bool = typer.Option(False, "--children", "-c", help="Also show child analyses"),
 ) -> None:
     """Show detail for a single analysis."""
     try:

@@ -1,6 +1,7 @@
 """
 omnia config  — view and edit persisted configuration
 """
+
 from __future__ import annotations
 
 import typer

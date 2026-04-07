@@ -1,6 +1,7 @@
 """
 omnia auth  — login / logout / whoami
 """
+
 from __future__ import annotations
 
 import typer

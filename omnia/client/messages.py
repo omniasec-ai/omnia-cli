@@ -1,4 +1,5 @@
 """Messages API: history retrieval and streaming chat."""
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -8,9 +9,7 @@ from omnia.client.base import iter_sse, request, stream_request
 from omnia.config.settings import settings
 
 
-def list_messages(
-    user_id: str, project_id: str, chat_id: str, tag: str = ""
-) -> list[dict]:
+def list_messages(user_id: str, project_id: str, chat_id: str, tag: str = "") -> list[dict]:
     params = {}
     if tag:
         params["tag"] = tag
@@ -19,12 +18,10 @@ def list_messages(
         f"/api/v1/app/users/{user_id}/projects/{project_id}/chats/{chat_id}/messages",
         params=params or None,
     )
-    return data.get("chat_messages", [])
+    return data.get("messages", data.get("chat_messages", []))
 
 
-def delete_message(
-    user_id: str, project_id: str, chat_id: str, message_id: str
-) -> dict:
+def delete_message(user_id: str, project_id: str, chat_id: str, message_id: str) -> dict:
     return request(
         "PATCH",
         f"/api/v1/app/users/{user_id}/projects/{project_id}/chats/{chat_id}/messages/{message_id}",
@@ -81,9 +78,7 @@ def stream_message(
     **kwargs,
 ) -> Iterator[dict]:
     """Yield SSE event dicts from the agent streaming endpoint."""
-    payload = _build_payload(
-        user_id, project_id, chat_id, query, streaming=True, **kwargs
-    )
+    payload = _build_payload(user_id, project_id, chat_id, query, streaming=True, **kwargs)
     with stream_request(
         "POST", "/api/v1/agents/OmniaMainAgent/a1/chat/run", json=payload
     ) as response:
@@ -98,9 +93,7 @@ def send_message(
     **kwargs,
 ) -> dict:
     """Non-streaming request (fallback)."""
-    payload = _build_payload(
-        user_id, project_id, chat_id, query, streaming=False, **kwargs
-    )
+    payload = _build_payload(user_id, project_id, chat_id, query, streaming=False, **kwargs)
     return request(
         "POST",
         "/api/v1/agents/OmniaMainAgent/a1/chat/run",

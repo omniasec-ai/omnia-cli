@@ -8,6 +8,7 @@ URLs are built as:  settings.api_url + path
 We avoid httpx's base_url merging because httpx discards the base path
 component whenever the request path starts with "/".
 """
+
 from __future__ import annotations
 
 import json
@@ -44,7 +45,7 @@ def _url(path: str) -> str:
 def _auth_headers() -> dict[str, str]:
     if not settings.is_configured():
         raise NotConfiguredError("Not authenticated. Run /login first.")
-    
+
     val = settings.api_key
     # If it's just a hex/uuid string without a scheme, it's likely an incomplete API Key auth
     if " " not in val.strip():
@@ -53,14 +54,14 @@ def _auth_headers() -> dict[str, str]:
             "Invalid API Key format. It should be 'Basic <base64>' or 'Bearer <token>'.\n"
             "Try running /login again to re-authenticate with your User ID and API Key."
         )
-        
+
     return {"Authorization": val}
 
 
 def _handle_response(response: httpx.Response) -> None:
     if response.is_success:
         return
-    
+
     # For streaming responses, we must read the content to access .text or .json()
     try:
         response.read()
@@ -78,6 +79,7 @@ def _handle_response(response: httpx.Response) -> None:
 # ---------------------------------------------------------------------------
 # Public helpers (no auth)
 # ---------------------------------------------------------------------------
+
 
 def public_request(
     method: str,
@@ -109,6 +111,7 @@ def public_request(
 # Authenticated helpers
 # ---------------------------------------------------------------------------
 
+
 def request(
     method: str,
     path: str,
@@ -123,12 +126,14 @@ def request(
     last_exc: Exception | None = None
     for attempt in range(_MAX_RETRIES + 1):
         try:
-            with httpx.Client(
-                headers=headers, timeout=timeout, follow_redirects=True
-            ) as client:
+            with httpx.Client(headers=headers, timeout=timeout, follow_redirects=True) as client:
                 resp = client.request(
-                    method, _url(path),
-                    json=json, params=params, files=files, data=data,
+                    method,
+                    _url(path),
+                    json=json,
+                    params=params,
+                    files=files,
+                    data=data,
                 )
             _handle_response(resp)
             return resp.json()
@@ -153,9 +158,7 @@ def stream_request(
 ) -> Generator[httpx.Response, None, None]:
     """Context manager for SSE streaming requests."""
     headers = _auth_headers()
-    with httpx.Client(
-        headers=headers, timeout=timeout, follow_redirects=True
-    ) as client:
+    with httpx.Client(headers=headers, timeout=timeout, follow_redirects=True) as client:
         with client.stream(method, _url(path), json=json) as response:
             _handle_response(response)
             yield response
@@ -176,7 +179,7 @@ def iter_sse(response: httpx.Response) -> Iterator[dict]:
                     raw = line[5:].strip()
                 else:
                     raw = line
-                
+
                 if raw and raw != "[DONE]":
                     try:
                         yield json.loads(raw)

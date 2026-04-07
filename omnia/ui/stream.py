@@ -4,6 +4,7 @@ Live SSE streaming renderer.
 Drives the streaming loop: receives SSE dicts, prints content
 incrementally and signals completion.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator

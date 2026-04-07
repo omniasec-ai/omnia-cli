@@ -1,5 +1,5 @@
 services:
-  omnia:
+  cli:
     build: .
     image: omnia-cli
     env_file:
@@ -10,6 +10,7 @@ services:
     # Mount host config dir so credentials persist between runs
     volumes:
       - ${HOME}/.omnia:/root/.omnia
+      - ./omnia:/app/omnia
     # Keep stdin open for the interactive REPL
     stdin_open: true
     tty: true

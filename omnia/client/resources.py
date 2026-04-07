@@ -1,4 +1,5 @@
 """Resources API (files attached to projects)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,9 +8,7 @@ from omnia.client.base import request
 
 
 def list_resources(user_id: str, project_id: str) -> list[dict]:
-    data = request(
-        "GET", f"/api/v1/app/users/{user_id}/projects/{project_id}/resources"
-    )
+    data = request("GET", f"/api/v1/app/users/{user_id}/projects/{project_id}/resources")
     return data.get("resources", [])
 
 

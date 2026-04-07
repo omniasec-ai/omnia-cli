@@ -1,4 +1,5 @@
 """Projects and chats API."""
+
 from __future__ import annotations
 
 from omnia.client.base import request
@@ -47,10 +48,10 @@ def create_chat(user_id: str, project_id: str, name: str = "Chat") -> dict:
 
 
 def get_or_create_chat(user_id: str, project_id: str) -> dict:
-    """Return the first chat of a project, creating one if none exists."""
+    """Return the most recently updated chat of a project, creating one if none exists."""
     chats = list_chats(user_id, project_id)
     if chats:
-        return chats[0]
+        return max(chats, key=lambda c: c.get("updated_at") or c.get("created_at") or "")
     return create_chat(user_id, project_id)
 
 

@@ -1,4 +1,5 @@
 """Templates API."""
+
 from __future__ import annotations
 
 from omnia.client.base import request
@@ -8,9 +9,7 @@ def list_templates(user_id: str, search: str = "") -> list[dict]:
     params = {}
     if search:
         params["search"] = search
-    data = request(
-        "GET", f"/api/v1/app/users/{user_id}/templates", params=params or None
-    )
+    data = request("GET", f"/api/v1/app/users/{user_id}/templates", params=params or None)
     return data.get("templates", [])
 
 

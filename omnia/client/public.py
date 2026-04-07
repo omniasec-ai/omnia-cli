@@ -11,6 +11,7 @@ Endpoints:
   GET  /api/v1/public/market-intelligence/package/{market}/{id}/versions
   GET  /api/v1/public/project_backups/{token}/preview
 """
+
 from __future__ import annotations
 
 from omnia.client.base import public_request
@@ -23,6 +24,7 @@ def get_api_version() -> dict:
 # ---------------------------------------------------------------------------
 # Public analysis
 # ---------------------------------------------------------------------------
+
 
 def get_public_analysis(analysis_id: str) -> dict:
     return public_request("GET", f"/api/v1/public/analysis/{analysis_id}")
@@ -37,6 +39,7 @@ def get_public_analysis_children(analysis_id: str) -> list[dict]:
 # Public templates
 # ---------------------------------------------------------------------------
 
+
 def get_public_template(template_id: str) -> dict:
     return public_request("GET", f"/api/v1/public/templates/{template_id}")
 
@@ -44,6 +47,7 @@ def get_public_template(template_id: str) -> dict:
 # ---------------------------------------------------------------------------
 # Market intelligence (fully public)
 # ---------------------------------------------------------------------------
+
 
 def search_market(query: str, page: int = 1, limit: int = 20) -> dict:
     return public_request(
@@ -75,8 +79,7 @@ def get_market_package_versions(market: str, market_id: str) -> dict:
 # Shared chat preview
 # ---------------------------------------------------------------------------
 
+
 def get_shared_chat(token: str) -> dict:
-    data = public_request(
-        "GET", f"/api/v1/public/project_backups/{token}/preview"
-    )
+    data = public_request("GET", f"/api/v1/public/project_backups/{token}/preview")
     return data.get("project_backup_preview", data)

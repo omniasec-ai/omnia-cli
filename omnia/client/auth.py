@@ -1,4 +1,5 @@
 """Auth-related API calls."""
+
 from __future__ import annotations
 
 from omnia.client.base import request

@@ -53,6 +53,7 @@ Any plain text (no leading /) is sent as a message to the current chat.
 
 from __future__ import annotations
 
+import base64
 import os
 import shlex
 from pathlib import Path
@@ -68,17 +69,16 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
 from rich.text import Text
-import base64
 
-from omnia.client import auth as auth_client
-from omnia.client import projects as projects_client
-from omnia.client import messages as messages_client
 from omnia.client import analysis as analysis_client
-from omnia.client import templates as templates_client
-from omnia.client import resources as resources_client
+from omnia.client import auth as auth_client
+from omnia.client import messages as messages_client
+from omnia.client import projects as projects_client
 from omnia.client import public as public_client
-from omnia.client.base import OmniaAPIError, NotConfiguredError
-from omnia.config.settings import settings, CONFIG_DIR
+from omnia.client import resources as resources_client
+from omnia.client import templates as templates_client
+from omnia.client.base import NotConfiguredError, OmniaAPIError
+from omnia.config.settings import CONFIG_DIR, settings
 from omnia.ui.messages import render_message
 from omnia.ui.stream import run_stream
 from omnia.ui.tables import (
@@ -301,15 +301,11 @@ class OmniaREPL:
             elif cmd == "/config":
                 self._cmd_config(args)
             else:
-                console.print(
-                    f"[red]Unknown command:[/red] {cmd}  (type [cyan]/help[/cyan])"
-                )
+                console.print(f"[red]Unknown command:[/red] {cmd}  (type [cyan]/help[/cyan])")
         except NotConfiguredError as exc:
             console.print(f"[yellow]{exc}[/yellow]")
         except OmniaAPIError as exc:
-            console.print(
-                f"[bold red]API error {exc.status_code}:[/bold red] {exc.detail}"
-            )
+            console.print(f"[bold red]API error {exc.status_code}:[/bold red] {exc.detail}")
         except Exception as exc:
             console.print(f"[bold red]Error:[/bold red] {exc}")
 
@@ -472,20 +468,13 @@ class OmniaREPL:
         rest = args[1:]
 
         if sub == "create":
-            name = (
-                " ".join(rest)
-                if rest
-                else _prompt_default("Project name", "New project")
-            )
+            name = " ".join(rest) if rest else _prompt_default("Project name", "New project")
             with console.status(f"[dim]Creating [cyan]{name}[/cyan]…[/dim]"):
-                project, chat = projects_client.create_project_with_chat(
-                    self.user_id, name
-                )
+                project, chat = projects_client.create_project_with_chat(self.user_id, name)
             self.project = project
             self.chat = chat
             console.print(
-                f"[green]Created:[/green] [bold]{name}[/bold]  "
-                f"[dim]({project['id']})[/dim]"
+                f"[green]Created:[/green] [bold]{name}[/bold]  [dim]({project['id']})[/dim]"
             )
 
         elif sub == "delete":
@@ -504,9 +493,7 @@ class OmniaREPL:
             console.print(f"[green]Deleted {pid}.[/green]")
 
         else:
-            console.print(
-                "[dim]Usage:[/dim]  /project create <name>  |  /project delete <id>"
-            )
+            console.print("[dim]Usage:[/dim]  /project create <name>  |  /project delete <id>")
 
     def _cmd_chat(self, args: list[str]) -> None:
         if args:
@@ -527,9 +514,7 @@ class OmniaREPL:
         else:
             name = _prompt_default("New project name", "Omnia session")
             with console.status(f"[dim]Creating [cyan]{name}[/cyan]…[/dim]"):
-                project, chat = projects_client.create_project_with_chat(
-                    self.user_id, name
-                )
+                project, chat = projects_client.create_project_with_chat(self.user_id, name)
             self.project = project
             self.chat = chat
             console.print(
@@ -538,9 +523,7 @@ class OmniaREPL:
             )
 
     def _cmd_new(self, args: list[str]) -> None:
-        name = (
-            " ".join(args) if args else _prompt_default("Project name", "New project")
-        )
+        name = " ".join(args) if args else _prompt_default("Project name", "New project")
         with console.status(f"[dim]Creating [cyan]{name}[/cyan]…[/dim]"):
             project, chat = projects_client.create_project_with_chat(self.user_id, name)
         self.project = project
@@ -639,9 +622,7 @@ class OmniaREPL:
 
     def _cmd_history(self) -> None:
         with console.status("[dim]Loading messages…[/dim]"):
-            msgs = messages_client.list_messages(
-                self.user_id, self.project["id"], self.chat["id"]
-            )
+            msgs = messages_client.list_messages(self.user_id, self.project["id"], self.chat["id"])
         if not msgs:
             console.print("[dim]No messages yet.[/dim]")
             return
@@ -720,9 +701,7 @@ class OmniaREPL:
                 console.print("[red]Usage: /template fork <id>[/red]")
                 return
             result = templates_client.fork_template(self.user_id, rest[0])
-            console.print(
-                f"[green]Forked.[/green] New ID: [cyan]{result.get('id')}[/cyan]"
-            )
+            console.print(f"[green]Forked.[/green] New ID: [cyan]{result.get('id')}[/cyan]")
 
         else:
             with console.status("[dim]Loading…[/dim]"):
@@ -752,12 +731,8 @@ class OmniaREPL:
             console.print(f"[red]File not found: {args[0]}[/red]")
             return
         with console.status(f"[dim]Uploading [cyan]{file_path.name}[/cyan]…[/dim]"):
-            resource = resources_client.upload_resource(
-                self.user_id, self.project["id"], file_path
-            )
-        console.print(
-            f"[green]Uploaded.[/green] Resource ID: [cyan]{resource.get('id')}[/cyan]"
-        )
+            resource = resources_client.upload_resource(self.user_id, self.project["id"], file_path)
+        console.print(f"[green]Uploaded.[/green] Resource ID: [cyan]{resource.get('id')}[/cyan]")
 
     # ------------------------------------------------------------------
     # ── Model / provider / config ─────────────────────────────────────
@@ -804,9 +779,7 @@ class OmniaREPL:
 
     def _send_message(self, text: str) -> None:
         if not self.user_info:
-            console.print(
-                "[yellow]Not logged in.[/yellow]  Run [cyan]/login[/cyan] first."
-            )
+            console.print("[yellow]Not logged in.[/yellow]  Run [cyan]/login[/cyan] first.")
             return
         if not self.project or not self.chat:
             console.print(
@@ -828,9 +801,7 @@ class OmniaREPL:
             )
             run_stream(events)
         except OmniaAPIError as exc:
-            console.print(
-                f"[bold red]API error {exc.status_code}:[/bold red] {exc.detail}"
-            )
+            console.print(f"[bold red]API error {exc.status_code}:[/bold red] {exc.detail}")
 
     # ------------------------------------------------------------------
     # ── Guards ────────────────────────────────────────────────────────
@@ -838,9 +809,7 @@ class OmniaREPL:
 
     def _require_auth(self) -> None:
         if not self.user_info:
-            raise NotConfiguredError(
-                "This command requires login. Run [cyan]/login[/cyan] first."
-            )
+            raise NotConfiguredError("This command requires login. Run [cyan]/login[/cyan] first.")
 
     def _require_chat(self) -> None:
         if not self.project or not self.chat:
@@ -903,9 +872,7 @@ def _print_market_package(data: dict) -> None:
             f"[bold {color}]{verdict.upper()}[/bold {color}]"
             f"  risk {analysis.get('risk_score', '-')}/10",
         )
-    console.print(
-        Panel(t, title=f"[bold]{pkg.get('name', 'Package')}[/bold]", expand=False)
-    )
+    console.print(Panel(t, title=f"[bold]{pkg.get('name', 'Package')}[/bold]", expand=False))
 
 
 def _print_market_versions(data: dict) -> None:
