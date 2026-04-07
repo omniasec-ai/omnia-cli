@@ -37,7 +37,6 @@ COMMANDS THAT REQUIRE LOGIN
 
   /agents                           List available agents
   /model [name]                     Show / change LLM model
-  /provider [name]                  Show / change LLM provider
 
   /config                           Show current configuration
   /config set <key> <value>         Set default_model or default_provider
@@ -134,7 +133,6 @@ _COMPLETIONS = [
     "/upload",
     "/agents",
     "/model",
-    "/provider",
     "/config",
     "/config set",
     "/help",
@@ -490,8 +488,6 @@ class OmniaREPL:
                 self._cmd_upload(args)
             elif cmd == "/model":
                 self._cmd_model(args)
-            elif cmd == "/provider":
-                self._cmd_provider(args)
             elif cmd == "/config":
                 self._cmd_config(args)
             else:
@@ -896,13 +892,6 @@ class OmniaREPL:
             )
         else:
             console.print(f"[dim]Cancelled — model unchanged:[/dim] [bold]{self.model}[/bold]")
-
-    def _cmd_provider(self, args: list[str]) -> None:
-        if not args:
-            console.print(f"[dim]Current provider:[/dim] [bold]{self.provider}[/bold]")
-        else:
-            self.provider = args[0]
-            console.print(f"[green]Provider:[/green] [bold]{self.provider}[/bold]")
 
     def _cmd_config(self, args: list[str]) -> None:
         if args and args[0].lower() == "set":
