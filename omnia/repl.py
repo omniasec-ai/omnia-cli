@@ -22,6 +22,8 @@ COMMANDS THAT REQUIRE LOGIN
   /chat                             Create a new project and start chatting
   /chat <project_id>                Switch to an existing project's chat
   /new <name>                       Create a project with this name and switch
+  /resume                           Pick a recent chat and continue the conversation
+  /leave                            Leave the current chat (keeps CLI open)
   /history                          Show this chat's message history
 
   /analysis                         List your file analyses
@@ -116,6 +118,8 @@ _COMPLETIONS = [
     "/project delete",
     "/chat",
     "/new",
+    "/resume",
+    "/leave",
     "/history",
     "/analysis",
     "/analysis upload",
@@ -265,6 +269,11 @@ class OmniaREPL:
             elif cmd == "/new":
                 self._require_auth()
                 self._cmd_new(args)
+            elif cmd == "/resume":
+                self._require_auth()
+                self._cmd_resume()
+            elif cmd == "/leave":
+                self._cmd_leave()
             elif cmd == "/history":
                 self._require_auth()
                 self._require_chat()
@@ -540,6 +549,93 @@ class OmniaREPL:
             f"[green]Created:[/green] [bold]{name}[/bold]  "
             "[dim]Start typing to send a message.[/dim]"
         )
+
+    def _cmd_leave(self) -> None:
+        if not self.project:
+            console.print("[dim]No active chat.[/dim]")
+            return
+        name = self.project.get("name", "")
+        self.project = None
+        self.chat = None
+        console.print(
+            f"[dim]Left[/dim] [bold]{name}[/bold][dim]. "
+            "Use [bold cyan]/chat[/bold cyan], [bold cyan]/new[/bold cyan] "
+            "or [bold cyan]/resume[/bold cyan] to start another.[/dim]"
+        )
+
+    def _cmd_resume(self) -> None:
+        with console.status("[dim]Loading recent chats…[/dim]"):
+            all_projects = projects_client.list_projects(self.user_id, limit=20)
+
+        if not all_projects:
+            console.print("[yellow]No projects found.[/yellow]")
+            return
+
+        # Sort by most recently updated
+        def _updated_key(p: dict) -> str:
+            return p.get("updated_at") or p.get("created_at") or ""
+
+        recent = sorted(all_projects, key=_updated_key, reverse=True)[:10]
+
+        from datetime import datetime
+        from rich.table import Table as _Table
+
+        t = _Table(title="Recent chats", show_lines=False, highlight=True)
+        t.add_column("#", style="bold cyan", justify="right", no_wrap=True)
+        t.add_column("Project", style="bold white")
+        t.add_column("Updated", style="dim")
+        t.add_column("ID", style="dim", no_wrap=True, max_width=36)
+
+        for i, p in enumerate(recent, start=1):
+            updated = p.get("updated_at") or p.get("created_at") or ""
+            try:
+                dt = datetime.fromisoformat(str(updated).replace("Z", "+00:00"))
+                updated_str = dt.strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                updated_str = str(updated) if updated else "-"
+            t.add_row(str(i), p.get("name", ""), updated_str, p.get("id", ""))
+
+        console.print(t)
+
+        raw = _prompt_default(f"Choose [1-{len(recent)}] (Enter to cancel)").strip()
+        if not raw:
+            console.print("[dim]Cancelled.[/dim]")
+            return
+
+        try:
+            idx = int(raw) - 1
+            if not (0 <= idx < len(recent)):
+                raise ValueError
+        except ValueError:
+            console.print("[red]Invalid selection.[/red]")
+            return
+
+        chosen = recent[idx]
+        project_id = chosen["id"]
+
+        with console.status("[dim]Loading chat…[/dim]"):
+            chat = projects_client.get_or_create_chat(self.user_id, project_id)
+
+        self.project = chosen
+        self.chat = chat
+
+        console.print(
+            f"[green]Resumed:[/green] [bold]{chosen.get('name')}[/bold]  "
+            f"[dim]Type a message to continue.[/dim]"
+        )
+
+        # Show the last few messages for context
+        with console.status("[dim]Loading history…[/dim]"):
+            msgs = messages_client.list_messages(self.user_id, project_id, chat["id"])
+
+        if msgs:
+            last_msgs = msgs[-6:]
+            console.print()
+            console.print("[dim]─── recent messages ───[/dim]")
+            for msg in last_msgs:
+                render_message(msg)
+            console.print("[dim]───────────────────────[/dim]")
+            console.print()
 
     def _cmd_history(self) -> None:
         with console.status("[dim]Loading messages…[/dim]"):
