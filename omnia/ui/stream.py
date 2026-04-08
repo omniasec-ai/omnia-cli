@@ -11,7 +11,8 @@ from collections.abc import Iterator
 
 from rich.console import Console
 from rich.live import Live
-from rich.text import Text
+from rich.spinner import Spinner
+from rich.text import Text  # used by Spinner(text=Text(...))
 
 from omnia.ui.messages import render_streaming_chunk
 
@@ -29,11 +30,34 @@ def run_stream(events: Iterator[dict]) -> str:
     console.print()
     console.print("[bold blue]Omnia[/bold blue]")
 
+    spinner = Spinner("dots2", text=Text(" thinking…", style="dim italic"), style="bold blue")
+
+    events_iter = iter(events)
+
+    # Show spinner until the first event arrives
+    first_event = None
     try:
-        for event in events:
+        with Live(
+            spinner,
+            console=console,
+            refresh_per_second=15,
+            transient=True,
+        ):
+            first_event = next(events_iter)
+    except StopIteration:
+        console.print()
+        return ""
+    except KeyboardInterrupt:
+        console.print("\n[dim](interrupted)[/dim]")
+        return ""
+
+    # Process all events (first + rest) normally
+    try:
+        import itertools
+
+        for event in itertools.chain([first_event], events_iter):
             component_type = event.get("component_type", "assistant")
 
-            # Print a separator when message type changes mid-stream
             if current_type and current_type != component_type:
                 console.print()
 
@@ -43,6 +67,6 @@ def run_stream(events: Iterator[dict]) -> str:
     except KeyboardInterrupt:
         console.print("\n[dim](interrupted)[/dim]")
     finally:
-        console.print()  # newline after streamed content
+        console.print()
 
     return "".join(buffer)
