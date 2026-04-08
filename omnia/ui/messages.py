@@ -140,10 +140,28 @@ def _render_analysis(msg: dict) -> None:
 
 
 def _render_workflow(msg: dict, component_type: str) -> None:
-    icon = "▶" if component_type == "workflow_launch" else "■"
-    name = msg.get("workflow_name") or msg.get("content", "workflow")
-    style = "bold cyan" if component_type == "workflow_launch" else "dim"
-    console.print(f"[{style}]{icon} {name}[/{style}]")
+    raw = msg.get("content", "")
+    title = ""
+    run_status = ""
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+        if isinstance(data, dict):
+            tmpl = data.get("target_template") or {}
+            title = tmpl.get("title", "")
+            run_status = data.get("run_status", "")
+    except Exception:
+        pass
+
+    name = title or msg.get("workflow_name", "workflow")
+
+    if component_type == "workflow_launch":
+        console.print(f"[bold cyan]▶ Workflow started:[/bold cyan] [bold]{name}[/bold]")
+    else:
+        status_color = "green" if run_status in ("DONE", "COMPLETED", "") else "yellow"
+        console.print(
+            f"[bold {status_color}]■ Workflow finished:[/bold {status_color}] [bold]{name}[/bold]"
+            + (f"  [dim]{run_status}[/dim]" if run_status else "")
+        )
 
 
 def _render_agent_launch(msg: dict) -> None:

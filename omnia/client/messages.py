@@ -9,14 +9,16 @@ from omnia.client.base import iter_sse, request, stream_request
 from omnia.config.settings import settings
 
 
-def list_messages(user_id: str, project_id: str, chat_id: str, tag: str = "") -> list[dict]:
-    params = {}
-    if tag:
-        params["tag"] = tag
+_DEFAULT_TAGS = "frontend,agent_launch,workflow_launch"
+
+
+def list_messages(
+    user_id: str, project_id: str, chat_id: str, tag: str = _DEFAULT_TAGS
+) -> list[dict]:
     data = request(
         "GET",
         f"/api/v1/app/users/{user_id}/projects/{project_id}/chats/{chat_id}/messages",
-        params=params or None,
+        params={"tag": tag},
     )
     return data.get("messages", data.get("chat_messages", []))
 
@@ -72,6 +74,41 @@ def _build_payload(
     if agent_launch_id:
         payload["agent_launch_id"] = agent_launch_id
     return payload
+
+
+def launch_workflow(
+    agent_name: str,
+    workflow_endpoint: str,
+    user_id: str,
+    project_id: str,
+    chat_id: str,
+    workflow_template_id: str,
+    written_params: dict,
+    *,
+    model: Optional[str] = None,
+    provider: Optional[str] = None,
+    user_settings: Optional[dict] = None,
+) -> dict:
+    """Launch an AGENT_WORKFLOW template (non-streaming POST, matching frontend)."""
+    _model = model or settings.default_model
+    _provider = provider or settings.default_provider
+    payload = {
+        "query": "",
+        "user_id": user_id,
+        "project_id": project_id,
+        "chat_id": chat_id,
+        "workflow_template_id": workflow_template_id,
+        "written_params": written_params,
+        "mcp_servers": [],
+        "additional_info": "",
+        "config": {
+            "selected_model": _model,
+            "selected_provider": _provider,
+            "user_settings": user_settings or {},
+        },
+    }
+    endpoint = f"/api/v1/agents/{agent_name}{workflow_endpoint}"
+    return request("POST", endpoint, json=payload, timeout=120.0)
 
 
 def stream_message(
