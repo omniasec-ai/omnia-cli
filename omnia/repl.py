@@ -25,6 +25,7 @@ COMMANDS THAT REQUIRE LOGIN
   /knowledge                        Attach a knowledge base to next messages (#chip)
   /skill                            Attach a skill to next messages (/chip)
   /prompt                           Browse prompts and insert one into the conversation
+  /workflow                         Launch a workflow (with variable prompting)
 
   /analysis                         List your file analyses
   /analysis upload <file>           Upload a file for analysis
@@ -67,6 +68,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.panel import Panel
@@ -128,6 +130,7 @@ _COMPLETIONS = [
     "/knowledge",
     "/skill",
     "/prompt",
+    "/workflow",
     "/analysis",
     "/analysis upload",
     "/analysis show",
@@ -345,6 +348,61 @@ def _chat_picker(projects: list[dict], window: int = 5) -> dict | None:
         sys.stdout.flush()
 
 
+# ---------------------------------------------------------------------------
+# Template variable helpers
+# ---------------------------------------------------------------------------
+
+
+def _trunc(s: str, n: int = 40) -> str:
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _collect_vars(template: dict) -> Optional[dict]:
+    """
+    Prompt the user to fill in each extracted_param of a template.
+    Returns a {name: value} dict, or None if the user cancelled.
+    """
+    params = template.get("extracted_params") or []
+    if not params:
+        return {}
+
+    console.print(f"\n[dim]This template has [bold]{len(params)}[/bold] variable(s):[/dim]")
+    written: dict = {}
+    for p in params:
+        name = p.get("name", "")
+        desc = p.get("description", "")
+        default = p.get("value") or ""
+        hint = f" [dim]({desc})[/dim]" if desc else ""
+        prompt_str = f"  [cyan]{name}[/cyan]{hint}"
+        if default:
+            prompt_str += f" [dim](default: {default})[/dim]"
+        prompt_str += ": "
+        value = Prompt.ask(prompt_str, default=default or "").strip()
+        if value == "" and not default:
+            console.print("[dim]Cancelled.[/dim]")
+            return None
+        written[name] = value or default
+    return written
+
+
+def _apply_template_vars(template: dict) -> str:
+    """
+    Collect variables for a PROMPT template and return the substituted text.
+    Shows a Prompt.ask for each variable. Returns "" on cancel.
+    """
+    text: str = template.get("prompt") or template.get("description") or ""
+    if not text:
+        return ""
+
+    written = _collect_vars(template)
+    if written is None:
+        return ""
+
+    for name, value in written.items():
+        text = text.replace(f"${{{{{name}}}}}", value)
+    return text
+
+
 class OmniaREPL:
     def __init__(self) -> None:
         self.user_info: Optional[dict] = None
@@ -357,14 +415,25 @@ class OmniaREPL:
         self.selected_agent: Optional[dict] = None  # AGENT_RECIPE template
         self.selected_knowledge: Optional[dict] = None  # KNOWLEDGE template
         self.selected_skill: Optional[dict] = None  # SKILL template
+        self._pending_input: str = ""  # pre-filled text for next prompt
 
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Custom Ctrl+C binding: always raise KeyboardInterrupt immediately,
+        # even if the buffer has text (prompt_toolkit default clears buffer first).
+        _kb = KeyBindings()
+
+        @_kb.add("c-c", eager=True)
+        def _ctrl_c(event):
+            event.app.exit(exception=KeyboardInterrupt())
+
         self._session: PromptSession = PromptSession(
             history=FileHistory(str(CONFIG_DIR / "history")),
             auto_suggest=AutoSuggestFromHistory(),
             completer=WordCompleter(_COMPLETIONS, sentence=True),
             style=_PT_STYLE,
             complete_while_typing=False,
+            key_bindings=_kb,
         )
 
     # ------------------------------------------------------------------
@@ -417,8 +486,16 @@ class OmniaREPL:
 
         while True:
             try:
-                raw = self._session.prompt(self._prompt_text()).strip()
-            except (EOFError, KeyboardInterrupt):
+                pending, self._pending_input = self._pending_input, ""
+                raw = self._session.prompt(self._prompt_text(), default=pending).strip()
+            except KeyboardInterrupt:
+                if self.project:
+                    console.print()
+                    self._cmd_leave()
+                    continue
+                console.print("\n[dim]Goodbye.[/dim]")
+                break
+            except EOFError:
                 console.print("\n[dim]Goodbye.[/dim]")
                 break
 
@@ -499,6 +576,10 @@ class OmniaREPL:
             elif cmd == "/prompt":
                 self._require_auth()
                 self._cmd_pick_template("PROMPT")
+            elif cmd == "/workflow":
+                self._require_auth()
+                self._require_chat()
+                self._cmd_workflow()
             elif cmd == "/analysis":
                 self._cmd_analysis(args)  # has internal public/private split
             elif cmd == "/templates":
@@ -646,7 +727,6 @@ class OmniaREPL:
         )
 
     def _cmd_logout(self) -> None:
-        settings.api_url = ""
         settings.api_key = ""
         settings.save()
         self.user_info = None
@@ -755,6 +835,74 @@ class OmniaREPL:
                 "[dim]No messages yet. Start typing.[/dim]\n"
             )
 
+    def _cmd_workflow(self) -> None:
+        with console.status("[dim]Loading workflows…[/dim]"):
+            all_templates = templates_client.list_templates(self.user_id)
+
+        workflows = [
+            t
+            for t in all_templates
+            if t.get("template_type") == "AGENT_WORKFLOW"
+            and t.get("status") in ("ENABLED", "PRODUCTION", None, "")
+        ]
+        if not workflows:
+            console.print("[yellow]No workflows available.[/yellow]")
+            return
+
+        items = [{"name": _trunc(t.get("title", t.get("id", ""))), "_t": t} for t in workflows]
+        console.print("[dim]Select workflow:[/dim]")
+        chosen = _chat_picker(items, window=min(8, len(items)))
+        if not chosen:
+            console.print("[dim]Cancelled.[/dim]")
+            return
+
+        t = chosen["_t"]
+
+        # Fetch full template detail — the list endpoint may omit extracted_params
+        with console.status("[dim]Loading workflow…[/dim]"):
+            detail = templates_client.get_template(self.user_id, t["id"])
+        t = (
+            detail.get("template", detail)
+            if isinstance(detail, dict) and "template" in detail
+            else detail
+        )
+
+        written_params = _collect_vars(t)
+        if written_params is None:
+            return  # user cancelled during var collection
+
+        # Resolve the agent endpoint (mirrors frontend selectedAgentFromSettings)
+        agents = auth_client.get_agents()
+        agent = next(
+            (a for a in agents if a.get("default_workflow_endpoint") and a.get("can_chat")),
+            agents[0] if agents else None,
+        )
+        if not agent:
+            console.print("[red]No agent available to run workflows.[/red]")
+            return
+
+        console.print(f"[dim]Launching[/dim] [bold]{t.get('title')}[/bold][dim]…[/dim]")
+        try:
+            with console.status("[dim]Launching…[/dim]"):
+                messages_client.launch_workflow(
+                    agent_name=agent["name"],
+                    workflow_endpoint=agent["default_workflow_endpoint"],
+                    user_id=self.user_id,
+                    project_id=self.project["id"],
+                    chat_id=self.chat["id"],
+                    workflow_template_id=t["id"],
+                    written_params=written_params,
+                    model=self.model,
+                    provider=self.provider,
+                    user_settings=self.user_settings,
+                )
+            console.print(
+                "[green]Workflow launched.[/green]  "
+                "[dim]Use [bold cyan]/history[/bold cyan] to check results as they arrive.[/dim]"
+            )
+        except OmniaAPIError as exc:
+            console.print(f"[bold red]API error {exc.status_code}:[/bold red] {exc.detail}")
+
     def _cmd_pick_template(self, template_type: str) -> None:
         _LABELS = {
             "AGENT_RECIPE": ("agent", "@"),
@@ -789,9 +937,6 @@ class OmniaREPL:
 
         items = [{"name": "─ none ─", "_t": None}]
 
-        def _trunc(s: str, n: int = 40) -> str:
-            return s if len(s) <= n else s[: n - 1] + "…"
-
         for t in templates:
             title = _trunc(t.get("title", t.get("id", "")))
             active = current and current.get("id") == t.get("id")
@@ -814,16 +959,19 @@ class OmniaREPL:
             self.selected_skill = t
         elif template_type == "PROMPT":
             if t:
-                prompt_text = t.get("prompt") or t.get("description") or ""
-                console.print(
-                    Panel(
-                        prompt_text or "[dim](no prompt text)[/dim]",
-                        title=f"[bold]{t.get('title', '')}[/bold]",
-                        border_style="cyan",
-                        expand=False,
-                    )
+                # Fetch full detail so we have `prompt` text + `extracted_params`
+                with console.status("[dim]Loading prompt…[/dim]"):
+                    detail = templates_client.get_template(self.user_id, t["id"])
+                full = (
+                    detail.get("template", detail)
+                    if isinstance(detail, dict) and "template" in detail
+                    else detail
                 )
-                console.print("[dim]Prompt displayed — copy and use it in your next message.[/dim]")
+                self._pending_input = _apply_template_vars(full)
+                if self._pending_input:
+                    console.print(
+                        "[dim]Prompt ready — edit if needed and press Enter to send.[/dim]"
+                    )
             return
 
         if t:
