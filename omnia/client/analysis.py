@@ -12,7 +12,9 @@ def list_analyses(user_id: str, shared: bool = False) -> list[dict]:
     if shared:
         path += "/shared"
     data = request("GET", path)
-    return data.get("analyses", [])
+    if isinstance(data, list):
+        return data
+    return data.get("analysis", data.get("analyses", []))
 
 
 def get_analysis(analysis_id: str) -> dict:
@@ -21,16 +23,18 @@ def get_analysis(analysis_id: str) -> dict:
 
 def get_analysis_children(analysis_id: str) -> list[dict]:
     data = request("GET", f"/api/v1/app/analysis/{analysis_id}/childs")
-    return data.get("analyses", [])
+    return data.get("childs", data.get("analyses", []))
 
 
 def upload_file(user_id: str, file_path: Path) -> dict:
-    """Upload a file and trigger analysis. Returns the analysis object."""
+    """Upload a file and trigger analysis (standalone, no chat). Returns the analysis object."""
     with open(file_path, "rb") as fh:
         files = {"file": (file_path.name, fh, "application/octet-stream")}
-        return request(
+        data = request(
             "POST",
-            f"/api/v1/app/users/{user_id}/analysis",
+            f"/api/v1/app/users/{user_id}/launch/analysis",
             files=files,
             timeout=120.0,
         )
+    # Response: { "analysis": { "analysis_id": "...", ... } }
+    return data.get("analysis", data)
