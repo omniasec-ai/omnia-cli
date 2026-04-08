@@ -15,12 +15,13 @@ def list_resources(user_id: str, project_id: str) -> list[dict]:
 def upload_resource(user_id: str, project_id: str, file_path: Path) -> dict:
     with open(file_path, "rb") as fh:
         files = {"file": (file_path.name, fh, "application/octet-stream")}
-        return request(
+        data = request(
             "POST",
             f"/api/v1/app/users/{user_id}/projects/{project_id}/resources",
             files=files,
             timeout=120.0,
         )
+    return data.get("resource", data)
 
 
 def delete_resource(user_id: str, project_id: str, resource_id: str) -> dict:

@@ -68,7 +68,7 @@ from pathlib import Path
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.completion import Completer, Completion, PathCompleter, WordCompleter
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
@@ -84,6 +84,7 @@ from omnia.client import messages as messages_client
 from omnia.client import projects as projects_client
 from omnia.client import public as public_client
 from omnia.client import resources as resources_client
+from omnia.client import workflows as workflows_client
 from omnia.client import templates as templates_client
 from omnia.client.base import NotConfiguredError, OmniaAPIError
 from omnia.config.settings import CONFIG_DIR, settings
@@ -151,6 +152,31 @@ _COMPLETIONS = [
 ]
 
 _PT_STYLE = Style.from_dict({"prompt": "ansicyan bold"})
+
+_PATH_COMMANDS = {"/analysis upload", "/upload"}
+
+
+class _OmniaCompleter(Completer):
+    """Command completer with path completion for file arguments."""
+
+    def __init__(self) -> None:
+        self._word = WordCompleter(_COMPLETIONS, sentence=True)
+        self._path = PathCompleter(expanduser=True)
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+        for cmd in _PATH_COMMANDS:
+            prefix = cmd + " "
+            if text.startswith(prefix):
+                path_doc = document.text_before_cursor[len(prefix) :]
+                from prompt_toolkit.document import Document
+
+                yield from self._path.get_completions(
+                    Document(path_doc, len(path_doc)), complete_event
+                )
+                return
+        yield from self._word.get_completions(document, complete_event)
+
 
 _VERDICT_COLOR: dict[str, str] = {"malicious": "red", "risky": "yellow", "undetected": "green"}
 
@@ -441,7 +467,7 @@ class OmniaREPL:
         self._session: PromptSession = PromptSession(
             history=FileHistory(str(CONFIG_DIR / "history")),
             auto_suggest=AutoSuggestFromHistory(),
-            completer=WordCompleter(_COMPLETIONS, sentence=True),
+            completer=_OmniaCompleter(),
             style=_PT_STYLE,
             complete_while_typing=False,
             key_bindings=_kb,
@@ -601,7 +627,6 @@ class OmniaREPL:
                 self._cmd_resources()
             elif cmd == "/upload":
                 self._require_auth()
-                self._require_chat()
                 self._cmd_upload(args)
             elif cmd == "/newprovider":
                 self._require_auth()
@@ -1010,7 +1035,7 @@ class OmniaREPL:
                 return
             with console.status(f"[dim]Uploading [cyan]{file_path.name}[/cyan]…[/dim]"):
                 result = analysis_client.upload_file(self.user_id, file_path)
-            aid = result.get("id", "")
+            aid = result.get("analysis_id", result.get("id", ""))
             console.print(
                 f"[green]Uploaded.[/green] Analysis ID: [cyan]{aid}[/cyan]\n"
                 f"[dim]Use [bold]/analysis show {aid}[/bold] to check results.[/dim]"
@@ -1092,9 +1117,36 @@ class OmniaREPL:
         if not file_path.exists():
             console.print(f"[red]File not found: {args[0]}[/red]")
             return
+
+        if not self.project:
+            # No active chat — fall back to standalone analysis upload
+            with console.status(
+                f"[dim]Uploading [cyan]{file_path.name}[/cyan] for analysis…[/dim]"
+            ):
+                result = analysis_client.upload_file(self.user_id, file_path)
+            aid = result.get("analysis_id", result.get("id", ""))
+            console.print(
+                f"[green]Uploaded.[/green] Analysis ID: [cyan]{aid}[/cyan]\n"
+                f"[dim]Use [bold]/analysis show {aid}[/bold] to check results.[/dim]"
+            )
+            return
+
+        # In a chat: upload resource then run the FileAnalysisWorkflow
         with console.status(f"[dim]Uploading [cyan]{file_path.name}[/cyan]…[/dim]"):
             resource = resources_client.upload_resource(self.user_id, self.project["id"], file_path)
-        console.print(f"[green]Uploaded.[/green] Resource ID: [cyan]{resource.get('id')}[/cyan]")
+        global_file_id = resource.get("global_file_id", "")
+        chat_id = self.chat["id"] if self.chat else ""
+        with console.status("[dim]Running analysis…[/dim]"):
+            result = workflows_client.run_file_analysis(
+                self.user_id, self.project["id"], global_file_id, chat_id
+            )
+        aid = result.get("analysis_id", "")
+        file_hash = result.get("file_hash", "")
+        console.print(
+            f"[green]Analysis started.[/green] ID: [cyan]{aid}[/cyan]"
+            + (f"  Hash: [dim]{file_hash[:16]}…[/dim]" if file_hash else "")
+            + f"\n[dim]Use [bold]/analysis show {aid}[/bold] to check results.[/dim]"
+        )
 
     # ------------------------------------------------------------------
     # ── Model / provider / config ─────────────────────────────────────
@@ -1223,13 +1275,85 @@ class OmniaREPL:
             except KeyError as exc:
                 console.print(f"[bold red]Error:[/bold red] {exc}")
         else:
-            t = Table(show_header=True, header_style="bold", box=None, padding=(0, 2))
-            t.add_column("Key")
-            t.add_column("Value")
-            for k, v in settings.as_dict().items():
-                display = "***" if k == "api_key" and v else str(v)
-                t.add_row(f"[cyan]{k}[/cyan]", display)
-            console.print(t)
+            import os
+
+            def _row(t: Table, key: str, value: str) -> None:
+                t.add_row(f"[dim]{key}[/dim]", value)
+
+            # ── Connection ──────────────────────────────────────────────
+            ct = Table(show_header=False, box=None, padding=(0, 2))
+            ct.add_column(style="dim", no_wrap=True)
+            ct.add_column()
+            env_name = os.getenv("OMNIA_ENV", "dev")
+            explicit_url = os.getenv("OMNIA_API_URL", "")
+            url_source = (
+                f"[dim](OMNIA_API_URL)[/dim]"
+                if explicit_url
+                else f"[dim](OMNIA_ENV={env_name})[/dim]"
+            )
+            _row(ct, "api_url", f"[cyan]{settings.api_url}[/cyan]  {url_source}")
+            if settings.is_configured():
+                key_src = (
+                    "[dim](env)[/dim]"
+                    if os.getenv("OMNIA_API_TOKEN")
+                    else "[dim](config file)[/dim]"
+                )
+                _row(ct, "api_key", f"[green]set[/green]  {key_src}")
+            else:
+                _row(ct, "api_key", "[red]not set[/red]  — run [cyan]/login[/cyan]")
+            console.print(Panel(ct, title="[bold]Connection[/bold]", expand=False))
+
+            # ── Session ─────────────────────────────────────────────────
+            st = Table(show_header=False, box=None, padding=(0, 2))
+            st.add_column(style="dim", no_wrap=True)
+            st.add_column()
+            if self.user_info:
+                email = self.user_info.get("email", self.user_id or "—")
+                _row(st, "user", f"[green]{email}[/green]")
+            else:
+                _row(st, "user", "[dim]not logged in[/dim]")
+            if self.project:
+                _row(
+                    st,
+                    "project",
+                    f"[cyan]{self.project.get('name', '')}[/cyan]  [dim]{self.project['id']}[/dim]",
+                )
+            else:
+                _row(st, "project", "[dim]none[/dim]")
+            if self.chat:
+                _row(
+                    st,
+                    "chat",
+                    f"[cyan]{self.chat.get('name', '')}[/cyan]  [dim]{self.chat['id']}[/dim]",
+                )
+            else:
+                _row(st, "chat", "[dim]none[/dim]")
+            if self.selected_agent:
+                _row(st, "agent", f"[magenta]{self.selected_agent.get('name', '')}[/magenta]")
+            if self.selected_knowledge:
+                _row(
+                    st, "knowledge", f"[magenta]{self.selected_knowledge.get('name', '')}[/magenta]"
+                )
+            if self.selected_skill:
+                _row(st, "skill", f"[magenta]{self.selected_skill.get('name', '')}[/magenta]")
+            console.print(Panel(st, title="[bold]Session[/bold]", expand=False))
+
+            # ── Defaults (editable) ──────────────────────────────────────
+            dt = Table(show_header=False, box=None, padding=(0, 2))
+            dt.add_column(style="dim", no_wrap=True)
+            dt.add_column()
+            _row(dt, "default_model", f"[yellow]{settings.default_model}[/yellow]")
+            _row(dt, "default_provider", f"[yellow]{settings.default_provider}[/yellow]")
+            console.print(
+                Panel(
+                    dt,
+                    title="[bold]Defaults[/bold]",
+                    subtitle="[dim]/config set <key> <value>[/dim]",
+                    expand=False,
+                )
+            )
+
+            console.print(f"[dim]Config file: {CONFIG_DIR / 'config.toml'}[/dim]")
 
     # ------------------------------------------------------------------
     # ── Message sending ───────────────────────────────────────────────
@@ -1302,7 +1426,7 @@ class OmniaREPL:
     def _require_chat(self) -> None:
         if not self.project or not self.chat:
             raise NotConfiguredError(
-                "No active chat. Run [cyan]/chat[/cyan] or [cyan]/new <name>[/cyan] first."
+                "No active chat. Run [cyan]/chats[/cyan] or [cyan]/new <name>[/cyan] first."
             )
 
 
@@ -1312,33 +1436,43 @@ class OmniaREPL:
 
 
 def _print_market_results(data: dict) -> None:
-    items = data.get("results", data.get("packages", []))
+    items = data.get("items", data.get("results", data.get("packages", [])))
     if not items:
         console.print("[yellow]No results.[/yellow]")
         return
-    t = Table(title="Market Intelligence", show_lines=False, highlight=True)
+    total = data.get("total", len(items))
+    t = Table(
+        title=f"Market Intelligence  [dim]({total} total)[/dim]",
+        show_lines=False,
+        highlight=True,
+    )
     t.add_column("Market", style="dim")
     t.add_column("ID", style="cyan")
-    t.add_column("Name / Version", style="bold white")
-    t.add_column("Latest analysis", style="dim")
+    t.add_column("Name", style="bold white")
+    t.add_column("Version", style="dim")
+    t.add_column("Verdict", no_wrap=True)
+    t.add_column("Risk", justify="right", style="dim")
     for item in items:
-        pkg = item.get("package", item)
-        analysis = item.get("latest_analysis", {}) or {}
+        analysis = item.get("analysis", {}) or {}
         verdict = (analysis.get("verdict") or "").lower()
         color = _VERDICT_COLOR.get(verdict, "dim")
         verdict_str = f"[{color}]{verdict}[/{color}]" if verdict else "[dim]-[/dim]"
+        risk = str(analysis.get("risk_score", "-")) if analysis else "-"
         t.add_row(
-            pkg.get("market", ""),
-            pkg.get("market_id", ""),
-            f"{pkg.get('name', '')}  [dim]{pkg.get('version', '')}[/dim]",
+            item.get("market", ""),
+            item.get("market_id", ""),
+            item.get("name", ""),
+            item.get("version", ""),
             verdict_str,
+            risk,
         )
     console.print(t)
 
 
 def _print_market_package(data: dict) -> None:
+    # API returns PublicPackageVersion directly (no wrapper)
     pkg = data.get("package", data)
-    analysis = data.get("latest_analysis", {}) or {}
+    analysis = data.get("analysis") or data.get("latest_analysis") or {}
     t = Table(show_header=False, box=None, padding=(0, 2))
     for k, v in [
         ("Market", pkg.get("market", "")),
@@ -1354,7 +1488,7 @@ def _print_market_package(data: dict) -> None:
         verdict = (analysis.get("verdict") or "").lower()
         color = _VERDICT_COLOR.get(verdict, "white")
         t.add_row(
-            "[dim]Latest verdict[/dim]",
+            "[dim]Verdict[/dim]",
             f"[bold {color}]{verdict.upper()}[/bold {color}]"
             f"  risk {analysis.get('risk_score', '-')}/10",
         )
@@ -1362,18 +1496,18 @@ def _print_market_package(data: dict) -> None:
 
 
 def _print_market_versions(data: dict) -> None:
-    versions = data.get("versions", [])
+    # API returns a plain list of version strings
+    if isinstance(data, list):
+        versions = data
+    else:
+        versions = data.get("versions", data.get("items", []))
     if not versions:
         console.print("[yellow]No versions found.[/yellow]")
         return
     t = Table(title="Versions", show_lines=False)
     t.add_column("Version", style="cyan")
-    t.add_column("Published", style="dim")
     for v in versions:
-        t.add_row(
-            str(v.get("version", v) if isinstance(v, dict) else v),
-            str(v.get("published_at", "") if isinstance(v, dict) else ""),
-        )
+        t.add_row(str(v))
     console.print(t)
 
 

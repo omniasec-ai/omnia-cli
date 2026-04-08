@@ -61,7 +61,7 @@ def analyses_table(analyses: list[dict]) -> Table:
         "pending": "dim",
     }
     t = Table(title="Analyses", show_lines=False, highlight=True)
-    t.add_column("ID", style="dim cyan", no_wrap=True, max_width=36)
+    t.add_column("Hash", style="dim cyan", no_wrap=True, max_width=16)
     t.add_column("Filename", style="white")
     t.add_column("Status", style="dim")
     t.add_column("Verdict", no_wrap=True)
@@ -70,7 +70,7 @@ def analyses_table(analyses: list[dict]) -> Table:
     for a in analyses:
         verdict = (a.get("verdict") or "pending").lower()
         t.add_row(
-            a.get("id", ""),
+            a.get("file_id", "")[:16] + "…",
             a.get("filename", ""),
             a.get("status", ""),
             f"[{_VERDICT_STYLE.get(verdict, 'white')}]{verdict}[/]",
