@@ -11,7 +11,7 @@ COMMANDS AVAILABLE WITHOUT LOGIN
 
 COMMANDS THAT REQUIRE LOGIN
 ────────────────────────────
-  /login [--url URL] [--key KEY]    Authenticate with the API
+  /login                            Authenticate with your User ID and API Key
   /logout                           Clear credentials
   /me                               Show current user
 
@@ -735,7 +735,6 @@ class OmniaREPL:
 
         settings.api_key = key
 
-        console.print(f"[dim]Connecting to[/dim] [cyan]{settings.api_url}[/cyan][dim]…[/dim]")
         with console.status("[dim]Verifying credentials…[/dim]"):
             data = auth_client.get_me()
 
@@ -1513,11 +1512,15 @@ def _print_market_versions(data: dict) -> None:
 
 def _print_shared_chat(data: dict) -> None:
     project = data.get("project", {})
+    chats = data.get("chats", [])
     messages = data.get("chat_messages", [])
+    chat_name = chats[0].get("name", "") if chats else ""
+    title_str = chat_name or project.get("name", "Shared Chat")
     console.print(
         Panel(
-            f"[bold white]{project.get('name', 'Shared Chat')}[/bold white]\n"
-            f"[dim]{len(messages)} messages[/dim]",
+            f"[bold white]{title_str}[/bold white]\n"
+            + (f"[dim]Project: {project.get('name', '')}[/dim]\n" if chat_name else "")
+            + f"[dim]{len(messages)} messages[/dim]",
             title="[bold]Shared Chat[/bold]",
             border_style="cyan",
             expand=False,
