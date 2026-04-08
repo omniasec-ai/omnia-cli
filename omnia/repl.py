@@ -364,13 +364,11 @@ class OmniaREPL:
 
     def _prompt_text(self) -> str:
         if self.project:
-            label = self.project.get("name", "chat")
+            return ">> "
         elif self.user_info:
             label = self.user_info.get("email", "omnia").split("@")[0]
         else:
             label = "omnia"
-        auth = "" if self.user_info else " [dim](not logged in)[/dim]"
-        # prompt_toolkit doesn't render Rich markup — keep it plain
         auth_plain = "" if self.user_info else " (?)"
         return f"{label}{auth_plain} >> "
 
@@ -643,14 +641,13 @@ class OmniaREPL:
             console.print("[yellow]No agents found.[/yellow]")
 
     def _cmd_new(self, args: list[str]) -> None:
-        name = " ".join(args) if args else _prompt_default("Chat name", "New chat")
-        with console.status(f"[dim]Creating [cyan]{name}[/cyan]…[/dim]"):
+        name = " ".join(args) if args else "New Chat"
+        with console.status(f"[dim]Creating chat…[/dim]"):
             project, chat = projects_client.create_project_with_chat(self.user_id, name)
         self.project = project
         self.chat = chat
         console.print(
-            f"[green]Created:[/green] [bold]{name}[/bold]  "
-            "[dim]Start typing to send a message.[/dim]"
+            "[green]New chat ready.[/green]  [dim]Start typing — it will be named automatically.[/dim]"
         )
 
     def _cmd_delete(self) -> None:
@@ -713,7 +710,7 @@ class OmniaREPL:
         if msgs:
             console.print()
             for msg in msgs:
-                render_message(msg)
+                render_message(msg, model=self.model)
             console.print()
         else:
             console.print(
@@ -728,7 +725,7 @@ class OmniaREPL:
             console.print("[dim]No messages yet.[/dim]")
             return
         for msg in msgs:
-            render_message(msg)
+            render_message(msg, model=self.model)
 
     # ------------------------------------------------------------------
     # ── Analysis ──────────────────────────────────────────────────────
@@ -976,7 +973,7 @@ class OmniaREPL:
             )
             return
 
-        console.print(f"\n[bold green]You[/bold green]  {text}")
+        was_new_chat = self.project.get("name") == "New Chat"
         try:
             events = messages_client.stream_message(
                 self.user_id,
@@ -987,9 +984,21 @@ class OmniaREPL:
                 provider=self.provider,
                 user_settings=self.user_settings,
             )
-            run_stream(events)
+            run_stream(events, model=self.model)
         except OmniaAPIError as exc:
             console.print(f"[bold red]API error {exc.status_code}:[/bold red] {exc.detail}")
+            return
+
+        # If this was the first message in a "New Chat", the backend has
+        # auto-renamed the project — refresh to pick up the new name.
+        if was_new_chat:
+            try:
+                updated = projects_client.get_project(self.user_id, self.project["id"])
+                if updated.get("name") and updated["name"] != "New Chat":
+                    self.project = updated
+                    console.print(f"[dim]Chat renamed to:[/dim] [bold]{updated['name']}[/bold]")
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # ── Guards ────────────────────────────────────────────────────────
