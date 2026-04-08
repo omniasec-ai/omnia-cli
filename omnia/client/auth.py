@@ -17,3 +17,12 @@ def get_agents() -> list[dict]:
 def get_last_user_settings(user_id: str) -> dict:
     data = request("GET", f"/api/v1/app/users/{user_id}/last_settings")
     return data.get("settings", {})
+
+
+def update_user_settings(user_id: str, settings: dict) -> dict:
+    data = request(
+        "PATCH",
+        f"/api/v1/app/users/{user_id}/last_settings",
+        json=settings,
+    )
+    return data.get("settings", {})
