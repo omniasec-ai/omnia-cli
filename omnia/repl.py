@@ -39,11 +39,11 @@ COMMANDS THAT REQUIRE LOGIN
   /upload <file>                    Upload a file as a resource
 
   /agents                           List available agents
-  /newprovider                           Configure API key for a provider (shows configured/pending)
+  /newprovider                      Configure API key for a provider (shows configured/pending)
   /model [name]                     Show / change LLM model
 
   /config                           Show current configuration
-  /config set <key> <value>         Set default_model or default_provider
+
 
   /help                             Show this help
   /clear                            Clear the screen
@@ -145,7 +145,6 @@ _COMPLETIONS = [
     "/newprovider",
     "/model",
     "/config",
-    "/config set",
     "/help",
     "/clear",
     "/exit",
@@ -1262,97 +1261,72 @@ class OmniaREPL:
             console.print(f"[dim]Cancelled — model unchanged:[/dim] [bold]{self.model}[/bold]")
 
     def _cmd_config(self, args: list[str]) -> None:
-        if args and args[0].lower() == "set":
-            rest = args[1:]
-            if len(rest) < 2:
-                console.print("[red]Usage: /config set <key> <value>[/red]")
-                return
-            try:
-                settings.set(rest[0], rest[1])
-                settings.save()
-                console.print(f"[green]Set[/green] {rest[0]} = {rest[1]!r}")
-            except KeyError as exc:
-                console.print(f"[bold red]Error:[/bold red] {exc}")
+        import os
+
+        def _row(t: Table, key: str, value: str) -> None:
+            t.add_row(f"[dim]{key}[/dim]", value)
+
+        # ── Connection ──────────────────────────────────────────────
+        ct = Table(show_header=False, box=None, padding=(0, 2))
+        ct.add_column(style="dim", no_wrap=True)
+        ct.add_column()
+        env_name = os.getenv("OMNIA_ENV", "dev")
+        explicit_url = os.getenv("OMNIA_API_URL", "")
+        url_source = (
+            f"[dim](OMNIA_API_URL)[/dim]" if explicit_url else f"[dim](OMNIA_ENV={env_name})[/dim]"
+        )
+        _row(ct, "api_url", f"[cyan]{settings.api_url}[/cyan]  {url_source}")
+        if settings.is_configured():
+            key_src = (
+                "[dim](env)[/dim]" if os.getenv("OMNIA_API_TOKEN") else "[dim](config file)[/dim]"
+            )
+            _row(ct, "api_key", f"[green]set[/green]  {key_src}")
         else:
-            import os
+            _row(ct, "api_key", "[red]not set[/red]  — run [cyan]/login[/cyan]")
+        console.print(Panel(ct, title="[bold]Connection[/bold]", expand=False))
 
-            def _row(t: Table, key: str, value: str) -> None:
-                t.add_row(f"[dim]{key}[/dim]", value)
-
-            # ── Connection ──────────────────────────────────────────────
-            ct = Table(show_header=False, box=None, padding=(0, 2))
-            ct.add_column(style="dim", no_wrap=True)
-            ct.add_column()
-            env_name = os.getenv("OMNIA_ENV", "dev")
-            explicit_url = os.getenv("OMNIA_API_URL", "")
-            url_source = (
-                f"[dim](OMNIA_API_URL)[/dim]"
-                if explicit_url
-                else f"[dim](OMNIA_ENV={env_name})[/dim]"
+        # ── Session ─────────────────────────────────────────────────
+        st = Table(show_header=False, box=None, padding=(0, 2))
+        st.add_column(style="dim", no_wrap=True)
+        st.add_column()
+        if self.user_info:
+            email = self.user_info.get("email", self.user_id or "—")
+            _row(st, "user", f"[green]{email}[/green]")
+        else:
+            _row(st, "user", "[dim]not logged in[/dim]")
+        if self.project:
+            _row(
+                st,
+                "project",
+                f"[cyan]{self.project.get('name', '')}[/cyan]  [dim]{self.project['id']}[/dim]",
             )
-            _row(ct, "api_url", f"[cyan]{settings.api_url}[/cyan]  {url_source}")
-            if settings.is_configured():
-                key_src = (
-                    "[dim](env)[/dim]"
-                    if os.getenv("OMNIA_API_TOKEN")
-                    else "[dim](config file)[/dim]"
-                )
-                _row(ct, "api_key", f"[green]set[/green]  {key_src}")
-            else:
-                _row(ct, "api_key", "[red]not set[/red]  — run [cyan]/login[/cyan]")
-            console.print(Panel(ct, title="[bold]Connection[/bold]", expand=False))
-
-            # ── Session ─────────────────────────────────────────────────
-            st = Table(show_header=False, box=None, padding=(0, 2))
-            st.add_column(style="dim", no_wrap=True)
-            st.add_column()
-            if self.user_info:
-                email = self.user_info.get("email", self.user_id or "—")
-                _row(st, "user", f"[green]{email}[/green]")
-            else:
-                _row(st, "user", "[dim]not logged in[/dim]")
-            if self.project:
-                _row(
-                    st,
-                    "project",
-                    f"[cyan]{self.project.get('name', '')}[/cyan]  [dim]{self.project['id']}[/dim]",
-                )
-            else:
-                _row(st, "project", "[dim]none[/dim]")
-            if self.chat:
-                _row(
-                    st,
-                    "chat",
-                    f"[cyan]{self.chat.get('name', '')}[/cyan]  [dim]{self.chat['id']}[/dim]",
-                )
-            else:
-                _row(st, "chat", "[dim]none[/dim]")
-            if self.selected_agent:
-                _row(st, "agent", f"[magenta]{self.selected_agent.get('name', '')}[/magenta]")
-            if self.selected_knowledge:
-                _row(
-                    st, "knowledge", f"[magenta]{self.selected_knowledge.get('name', '')}[/magenta]"
-                )
-            if self.selected_skill:
-                _row(st, "skill", f"[magenta]{self.selected_skill.get('name', '')}[/magenta]")
-            console.print(Panel(st, title="[bold]Session[/bold]", expand=False))
-
-            # ── Defaults (editable) ──────────────────────────────────────
-            dt = Table(show_header=False, box=None, padding=(0, 2))
-            dt.add_column(style="dim", no_wrap=True)
-            dt.add_column()
-            _row(dt, "default_model", f"[yellow]{settings.default_model}[/yellow]")
-            _row(dt, "default_provider", f"[yellow]{settings.default_provider}[/yellow]")
-            console.print(
-                Panel(
-                    dt,
-                    title="[bold]Defaults[/bold]",
-                    subtitle="[dim]/config set <key> <value>[/dim]",
-                    expand=False,
-                )
+        else:
+            _row(st, "project", "[dim]none[/dim]")
+        if self.chat:
+            _row(
+                st,
+                "chat",
+                f"[cyan]{self.chat.get('name', '')}[/cyan]  [dim]{self.chat['id']}[/dim]",
             )
+        else:
+            _row(st, "chat", "[dim]none[/dim]")
+        if self.selected_agent:
+            _row(st, "agent", f"[magenta]{self.selected_agent.get('name', '')}[/magenta]")
+        if self.selected_knowledge:
+            _row(st, "knowledge", f"[magenta]{self.selected_knowledge.get('name', '')}[/magenta]")
+        if self.selected_skill:
+            _row(st, "skill", f"[magenta]{self.selected_skill.get('name', '')}[/magenta]")
+        console.print(Panel(st, title="[bold]Session[/bold]", expand=False))
 
-            console.print(f"[dim]Config file: {CONFIG_DIR / 'config.toml'}[/dim]")
+        # ── Defaults ────────────────────────────────────────────────
+        dt = Table(show_header=False, box=None, padding=(0, 2))
+        dt.add_column(style="dim", no_wrap=True)
+        dt.add_column()
+        _row(dt, "default_model", f"[yellow]{settings.default_model}[/yellow]")
+        _row(dt, "default_provider", f"[yellow]{settings.default_provider}[/yellow]")
+        console.print(Panel(dt, title="[bold]Defaults[/bold]", expand=False))
+
+        console.print(f"[dim]Config file: {CONFIG_DIR / 'config.toml'}[/dim]")
 
     # ------------------------------------------------------------------
     # ── Message sending ───────────────────────────────────────────────
