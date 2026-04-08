@@ -33,6 +33,7 @@ COMMANDS THAT REQUIRE LOGIN
   /upload <file>                    Upload a file as a resource
 
   /agents                           List available agents
+  /newprovider                           Configure API key for a provider (shows configured/pending)
   /model [name]                     Show / change LLM model
 
   /config                           Show current configuration
@@ -127,6 +128,7 @@ _COMPLETIONS = [
     "/resources",
     "/upload",
     "/agents",
+    "/newprovider",
     "/model",
     "/config",
     "/config set",
@@ -478,6 +480,9 @@ class OmniaREPL:
                 self._require_auth()
                 self._require_chat()
                 self._cmd_upload(args)
+            elif cmd == "/newprovider":
+                self._require_auth()
+                self._cmd_newprovider()
             elif cmd == "/model":
                 self._cmd_model(args)
             elif cmd == "/config":
@@ -834,6 +839,78 @@ class OmniaREPL:
     # ── Model / provider / config ─────────────────────────────────────
     # ------------------------------------------------------------------
 
+    def _cmd_newprovider(self) -> None:
+        import copy
+
+        console.print(
+            "\n[bold]Configure a model provider[/bold]\n"
+            "[dim]Each provider (OpenAI, Anthropic, Google…) requires its own API key "
+            "to unlock its models in Omnia.\n"
+            "Select a provider below, paste your key, and it will be saved to your account.[/dim]\n"
+        )
+
+        providers = [
+            p
+            for p in self.user_settings.get("llm_providers", [])
+            if p.get("internal_name") != "omnia"
+        ]
+        if not providers:
+            console.print("[yellow]No providers available.[/yellow]")
+            return
+
+        def _has_key(p: dict) -> bool:
+            return any(
+                v.get("var_name") == "api_key" and v.get("var_value") for v in p.get("vars", [])
+            )
+
+        # Build picker items showing configured/pending status
+        # Wrap as fake "project" dicts: name field drives _chat_picker label
+        items = []
+        for i, p in enumerate(providers):
+            title = p.get("title", p["internal_name"])
+            status = "\x1b[32m✓\x1b[0m" if _has_key(p) else "\x1b[2m○\x1b[0m"
+            items.append({"name": f"{status}  {title}", "_idx": i})
+
+        console.print("[dim]Select provider:[/dim]")
+        chosen_item = _chat_picker(items, window=len(items))
+        if not chosen_item:
+            console.print("[dim]Cancelled.[/dim]")
+            return
+
+        provider = providers[chosen_item["_idx"]]
+
+        # Show current key if any
+        key_var = next(
+            (v for v in provider.get("vars", []) if v.get("var_name") == "api_key"), None
+        )
+        current = (key_var or {}).get("var_value") or ""
+        if current:
+            masked = "*" * 8 + current[-4:]
+            console.print(f"[dim]Current key:[/dim] [yellow]{masked}[/yellow]")
+
+        new_key = _prompt_secret("API key (Enter to cancel)").strip()
+        if not new_key:
+            console.print("[dim]Cancelled.[/dim]")
+            return
+
+        # Deep-clone settings and update the matching provider's api_key var
+        updated_settings = copy.deepcopy(self.user_settings)
+        for p in updated_settings.get("llm_providers", []):
+            if p.get("internal_name") == provider["internal_name"]:
+                for v in p.get("vars", []):
+                    if v.get("var_name") == "api_key":
+                        v["var_value"] = new_key
+                break
+
+        with console.status("[dim]Saving…[/dim]"):
+            self.user_settings = auth_client.update_user_settings(self.user_id, updated_settings)
+
+        console.print(
+            f"[green]✓ API key saved[/green] for [bold]{provider.get('title', provider['internal_name'])}[/bold]"
+        )
+
+    # ------------------------------------------------------------------
+
     def _cmd_model(self, args: list[str]) -> None:
         if args:
             # Direct set: /model <name>
@@ -845,10 +922,13 @@ class OmniaREPL:
         if not models:
             console.print(
                 "[yellow]No models available.[/yellow]  "
-                "Make sure you are logged in and have at least one provider configured."
+                "Use [bold cyan]/newprovider[/bold cyan] to add an API key for a provider."
             )
             return
 
+        console.print(
+            "[dim]Tip: use [bold cyan]/newprovider[/bold cyan] to add or update API keys for more providers.[/dim]"
+        )
         selected = _model_picker(models, self.model)
         if selected:
             self.model = selected["model"]
