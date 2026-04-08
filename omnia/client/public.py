@@ -81,5 +81,10 @@ def get_market_package_versions(market: str, market_id: str) -> dict:
 
 
 def get_shared_chat(token: str) -> dict:
+    import json as _json
+
     data = public_request("GET", f"/api/v1/public/project_backups/{token}/preview")
-    return data.get("project_backup_preview", data)
+    raw = data.get("project_backup_preview", data)
+    if isinstance(raw, str):
+        raw = _json.loads(raw)
+    return raw
