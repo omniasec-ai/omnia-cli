@@ -1146,11 +1146,20 @@ class OmniaREPL:
         if current:
             masked = "*" * 8 + current[-4:]
             console.print(f"[dim]Current key:[/dim] [yellow]{masked}[/yellow]")
+            console.print("[dim]Leave empty to clear the key, Ctrl-C to cancel.[/dim]")
+            new_key = _prompt_secret("New API key (empty = clear)").strip()
+        else:
+            new_key = _prompt_secret("API key (Enter to cancel)").strip()
+            if not new_key:
+                console.print("[dim]Cancelled.[/dim]")
+                return
 
-        new_key = _prompt_secret("API key (Enter to cancel)").strip()
-        if not new_key:
-            console.print("[dim]Cancelled.[/dim]")
-            return
+        clearing = current and not new_key
+        if clearing:
+            confirm = _prompt_default("Remove API key? [y/N]", "n")
+            if confirm.lower() not in ("y", "yes"):
+                console.print("[dim]Cancelled.[/dim]")
+                return
 
         # Deep-clone settings and update the matching provider's api_key var
         updated_settings = copy.deepcopy(self.user_settings)
@@ -1164,9 +1173,11 @@ class OmniaREPL:
         with console.status("[dim]Saving…[/dim]"):
             self.user_settings = auth_client.update_user_settings(self.user_id, updated_settings)
 
-        console.print(
-            f"[green]✓ API key saved[/green] for [bold]{provider.get('title', provider['internal_name'])}[/bold]"
-        )
+        provider_name = provider.get("title", provider["internal_name"])
+        if clearing:
+            console.print(f"[yellow]✓ API key removed[/yellow] for [bold]{provider_name}[/bold]")
+        else:
+            console.print(f"[green]✓ API key saved[/green] for [bold]{provider_name}[/bold]")
 
     # ------------------------------------------------------------------
 
