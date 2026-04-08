@@ -38,7 +38,6 @@ COMMANDS THAT REQUIRE LOGIN
   /resources                        List resources in current chat
   /upload <file>                    Upload a file as a resource
 
-  /agents                           List available agents
   /newprovider                      Configure API key for a provider (shows configured/pending)
   /model [name]                     Show / change LLM model
 
@@ -141,7 +140,6 @@ _COMPLETIONS = [
     "/template fork",
     "/resources",
     "/upload",
-    "/agents",
     "/newprovider",
     "/model",
     "/config",
@@ -578,9 +576,6 @@ class OmniaREPL:
             elif cmd == "/me":
                 self._require_auth()
                 self._cmd_me()
-            elif cmd == "/agents":
-                self._require_auth()
-                self._cmd_agents()
             elif cmd == "/new":
                 self._require_auth()
                 self._cmd_new(args)
@@ -779,13 +774,6 @@ class OmniaREPL:
     # ------------------------------------------------------------------
     # ── Projects / chats ──────────────────────────────────────────────
     # ------------------------------------------------------------------
-
-    def _cmd_agents(self) -> None:
-        agents = auth_client.get_agents()
-        if agents:
-            console.print(agents_table(agents))
-        else:
-            console.print("[yellow]No agents found.[/yellow]")
 
     def _cmd_new(self, args: list[str]) -> None:
         name = " ".join(args) if args else "New Chat"
