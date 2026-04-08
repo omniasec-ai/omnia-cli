@@ -55,14 +55,16 @@ Any plain text (no leading /) is sent as a message to the current chat.
 from __future__ import annotations
 
 import base64
+import copy
+import getpass
 import os
 import select
 import shlex
 import sys
 import termios
 import tty
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
@@ -90,7 +92,6 @@ from omnia.ui.stream import run_stream
 from omnia.ui.tables import (
     agents_table,
     analyses_table,
-    projects_table,
     resources_table,
     templates_table,
 )
@@ -151,7 +152,14 @@ _COMPLETIONS = [
 
 _PT_STYLE = Style.from_dict({"prompt": "ansicyan bold"})
 
-_VERDICT_COLOR = {"malicious": "red", "risky": "yellow", "undetected": "green"}
+_VERDICT_COLOR: dict[str, str] = {"malicious": "red", "risky": "yellow", "undetected": "green"}
+
+_TEMPLATE_LABELS: dict[str, tuple[str, str]] = {
+    "AGENT_RECIPE": ("agent", "@"),
+    "KNOWLEDGE": ("knowledge", "#"),
+    "SKILL": ("skill", "/"),
+    "PROMPT": ("prompt", "?"),
+}
 
 # ---------------------------------------------------------------------------
 # Model helpers  (mirrors omnia-frontend ModelDropdown / SettingsContext)
@@ -278,7 +286,6 @@ def _chat_picker(projects: list[dict], window: int = 5) -> dict | None:
     Arrow-key picker with a scrolling window of `window` visible items.
     Returns the chosen project dict, or None if cancelled.
     """
-    from datetime import datetime
 
     def _fmt(p: dict) -> str:
         name = p.get("name", "(unnamed)")
@@ -357,7 +364,11 @@ def _trunc(s: str, n: int = 40) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
-def _collect_vars(template: dict) -> Optional[dict]:
+def _chip(s: str, n: int = 12) -> str:
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _collect_vars(template: dict) -> dict | None:
     """
     Prompt the user to fill in each extracted_param of a template.
     Returns a {name: value} dict, or None if the user cancelled.
@@ -405,16 +416,16 @@ def _apply_template_vars(template: dict) -> str:
 
 class OmniaREPL:
     def __init__(self) -> None:
-        self.user_info: Optional[dict] = None
-        self.project: Optional[dict] = None
-        self.chat: Optional[dict] = None
+        self.user_info: dict | None = None
+        self.project: dict | None = None
+        self.chat: dict | None = None
         self.model: str = settings.default_model
         self.provider: str = settings.default_provider
         self.user_settings: dict = {}
         # Active message "chips"
-        self.selected_agent: Optional[dict] = None  # AGENT_RECIPE template
-        self.selected_knowledge: Optional[dict] = None  # KNOWLEDGE template
-        self.selected_skill: Optional[dict] = None  # SKILL template
+        self.selected_agent: dict | None = None  # AGENT_RECIPE template
+        self.selected_knowledge: dict | None = None  # KNOWLEDGE template
+        self.selected_skill: dict | None = None  # SKILL template
         self._pending_input: str = ""  # pre-filled text for next prompt
 
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -441,16 +452,12 @@ class OmniaREPL:
     # ------------------------------------------------------------------
 
     @property
-    def user_id(self) -> Optional[str]:
+    def user_id(self) -> str | None:
         return self.user_info.get("user_id") if self.user_info else None
 
     def _prompt_text(self) -> str:
         if self.project:
             chips = []
-
-            def _chip(s: str, n: int = 12) -> str:
-                return s if len(s) <= n else s[: n - 1] + "…"
-
             if self.selected_agent:
                 chips.append(f"@{_chip(self.selected_agent['title'])}")
             if self.selected_knowledge:
@@ -530,7 +537,7 @@ class OmniaREPL:
             elif cmd == "/help":
                 console.print(_HELP)
             elif cmd == "/clear":
-                os.system("clear")
+                console.clear()
             elif cmd == "/version":
                 self._cmd_version()
             elif cmd == "/market":
@@ -904,13 +911,7 @@ class OmniaREPL:
             console.print(f"[bold red]API error {exc.status_code}:[/bold red] {exc.detail}")
 
     def _cmd_pick_template(self, template_type: str) -> None:
-        _LABELS = {
-            "AGENT_RECIPE": ("agent", "@"),
-            "KNOWLEDGE": ("knowledge", "#"),
-            "SKILL": ("skill", "/"),
-            "PROMPT": ("prompt", "?"),
-        }
-        label, sigil = _LABELS.get(template_type, (template_type.lower(), ""))
+        label, sigil = _TEMPLATE_LABELS.get(template_type, (template_type.lower(), ""))
 
         with console.status(f"[dim]Loading {label}s…[/dim]"):
             all_templates = templates_client.list_templates(self.user_id)
@@ -1100,8 +1101,6 @@ class OmniaREPL:
     # ------------------------------------------------------------------
 
     def _cmd_newprovider(self) -> None:
-        import copy
-
         console.print(
             "\n[bold]Configure a model provider[/bold]\n"
             "[dim]Each provider (OpenAI, Anthropic, Google…) requires its own API key "
@@ -1315,7 +1314,6 @@ def _print_market_results(data: dict) -> None:
         pkg = item.get("package", item)
         analysis = item.get("latest_analysis", {}) or {}
         verdict = (analysis.get("verdict") or "").lower()
-        _VERDICT_COLOR = {"malicious": "red", "risky": "yellow", "undetected": "green"}
         color = _VERDICT_COLOR.get(verdict, "dim")
         verdict_str = f"[{color}]{verdict}[/{color}]" if verdict else "[dim]-[/dim]"
         t.add_row(
@@ -1343,7 +1341,6 @@ def _print_market_package(data: dict) -> None:
             t.add_row(f"[dim]{k}[/dim]", str(v))
     if analysis:
         verdict = (analysis.get("verdict") or "").lower()
-        _VERDICT_COLOR = {"malicious": "red", "risky": "yellow", "undetected": "green"}
         color = _VERDICT_COLOR.get(verdict, "white")
         t.add_row(
             "[dim]Latest verdict[/dim]",
@@ -1432,7 +1429,7 @@ def _print_template_detail(tmpl: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _flag(args: list[str], flag: str) -> Optional[str]:
+def _flag(args: list[str], flag: str) -> str | None:
     try:
         idx = args.index(flag)
         return args[idx + 1]
@@ -1447,6 +1444,4 @@ def _prompt_default(label: str, default: str = "") -> str:
 
 
 def _prompt_secret(label: str) -> str:
-    import getpass
-
     return getpass.getpass(f"{label}: ")
