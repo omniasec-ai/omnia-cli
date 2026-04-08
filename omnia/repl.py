@@ -21,6 +21,11 @@ COMMANDS THAT REQUIRE LOGIN
   /leave  /back                     Leave the current chat (keeps CLI open)
   /history                          Show this chat's message history
 
+  /agent                            Attach an agent recipe to next messages (@chip)
+  /knowledge                        Attach a knowledge base to next messages (#chip)
+  /skill                            Attach a skill to next messages (/chip)
+  /prompt                           Browse prompts and insert one into the conversation
+
   /analysis                         List your file analyses
   /analysis upload <file>           Upload a file for analysis
   /analysis show <id>               Show analysis detail (public or private)
@@ -119,6 +124,10 @@ _COMPLETIONS = [
     "/leave",
     "/back",
     "/history",
+    "/agent",
+    "/knowledge",
+    "/skill",
+    "/prompt",
     "/analysis",
     "/analysis upload",
     "/analysis show",
@@ -344,6 +353,10 @@ class OmniaREPL:
         self.model: str = settings.default_model
         self.provider: str = settings.default_provider
         self.user_settings: dict = {}
+        # Active message "chips"
+        self.selected_agent: Optional[dict] = None  # AGENT_RECIPE template
+        self.selected_knowledge: Optional[dict] = None  # KNOWLEDGE template
+        self.selected_skill: Optional[dict] = None  # SKILL template
 
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         self._session: PromptSession = PromptSession(
@@ -364,7 +377,19 @@ class OmniaREPL:
 
     def _prompt_text(self) -> str:
         if self.project:
-            return ">> "
+            chips = []
+
+            def _chip(s: str, n: int = 12) -> str:
+                return s if len(s) <= n else s[: n - 1] + "…"
+
+            if self.selected_agent:
+                chips.append(f"@{_chip(self.selected_agent['title'])}")
+            if self.selected_knowledge:
+                chips.append(f"#{_chip(self.selected_knowledge['title'])}")
+            if self.selected_skill:
+                chips.append(f"/{_chip(self.selected_skill['title'])}")
+            chip_str = "".join(f"[{c}]" for c in chips)
+            return f"{chip_str}>> " if chip_str else ">> "
         elif self.user_info:
             label = self.user_info.get("email", "omnia").split("@")[0]
         else:
@@ -462,6 +487,18 @@ class OmniaREPL:
                 self._require_auth()
                 self._require_chat()
                 self._cmd_history()
+            elif cmd == "/agent":
+                self._require_auth()
+                self._cmd_pick_template("AGENT_RECIPE")
+            elif cmd == "/knowledge":
+                self._require_auth()
+                self._cmd_pick_template("KNOWLEDGE")
+            elif cmd == "/skill":
+                self._require_auth()
+                self._cmd_pick_template("SKILL")
+            elif cmd == "/prompt":
+                self._require_auth()
+                self._cmd_pick_template("PROMPT")
             elif cmd == "/analysis":
                 self._cmd_analysis(args)  # has internal public/private split
             elif cmd == "/templates":
@@ -717,6 +754,84 @@ class OmniaREPL:
                 f"\n[green]Entered:[/green] [bold]{chosen.get('name')}[/bold]  "
                 "[dim]No messages yet. Start typing.[/dim]\n"
             )
+
+    def _cmd_pick_template(self, template_type: str) -> None:
+        _LABELS = {
+            "AGENT_RECIPE": ("agent", "@"),
+            "KNOWLEDGE": ("knowledge", "#"),
+            "SKILL": ("skill", "/"),
+            "PROMPT": ("prompt", "?"),
+        }
+        label, sigil = _LABELS.get(template_type, (template_type.lower(), ""))
+
+        with console.status(f"[dim]Loading {label}s…[/dim]"):
+            all_templates = templates_client.list_templates(self.user_id)
+
+        templates = [
+            t
+            for t in all_templates
+            if t.get("template_type") == template_type
+            and t.get("status") in ("ENABLED", "PRODUCTION", None, "")
+        ]
+
+        if not templates:
+            console.print(f"[yellow]No {label}s available.[/yellow]")
+            return
+
+        # Build picker items: first entry clears the current selection
+        _CURRENT = {
+            "AGENT_RECIPE": self.selected_agent,
+            "KNOWLEDGE": self.selected_knowledge,
+            "SKILL": self.selected_skill,
+            "PROMPT": None,
+        }
+        current = _CURRENT.get(template_type)
+
+        items = [{"name": "─ none ─", "_t": None}]
+
+        def _trunc(s: str, n: int = 40) -> str:
+            return s if len(s) <= n else s[: n - 1] + "…"
+
+        for t in templates:
+            title = _trunc(t.get("title", t.get("id", "")))
+            active = current and current.get("id") == t.get("id")
+            marker = "✓ " if active else "  "
+            items.append({"name": f"{marker}{sigil}{title}", "_t": t})
+
+        console.print(f"[dim]Select {label} (none to clear):[/dim]")
+        chosen = _chat_picker(items, window=min(8, len(items)))
+        if chosen is None:
+            console.print("[dim]Cancelled.[/dim]")
+            return
+
+        t = chosen["_t"]
+
+        if template_type == "AGENT_RECIPE":
+            self.selected_agent = t
+        elif template_type == "KNOWLEDGE":
+            self.selected_knowledge = t
+        elif template_type == "SKILL":
+            self.selected_skill = t
+        elif template_type == "PROMPT":
+            if t:
+                prompt_text = t.get("prompt") or t.get("description") or ""
+                console.print(
+                    Panel(
+                        prompt_text or "[dim](no prompt text)[/dim]",
+                        title=f"[bold]{t.get('title', '')}[/bold]",
+                        border_style="cyan",
+                        expand=False,
+                    )
+                )
+                console.print("[dim]Prompt displayed — copy and use it in your next message.[/dim]")
+            return
+
+        if t:
+            console.print(
+                f"[green]✓ {label.capitalize()} attached:[/green] [bold]{t.get('title')}[/bold]"
+            )
+        else:
+            console.print(f"[dim]{label.capitalize()} cleared.[/dim]")
 
     def _cmd_history(self) -> None:
         with console.status("[dim]Loading messages…[/dim]"):
@@ -974,6 +1089,23 @@ class OmniaREPL:
             return
 
         was_new_chat = self.project.get("name") == "New Chat"
+
+        # Build chip kwargs from active selections
+        extra: dict = {}
+        if self.selected_agent:
+            extra["agent_launch_id"] = self.selected_agent["id"]
+            if self.selected_agent.get("tools"):
+                extra["native_tools"] = self.selected_agent["tools"]
+        if self.selected_knowledge:
+            extra["knowledges"] = [
+                {
+                    "knowledge_id": self.selected_knowledge["id"],
+                    "user_id": self.selected_knowledge.get("user_id", self.user_id),
+                }
+            ]
+        if self.selected_skill:
+            extra["skill_ids"] = [self.selected_skill["id"]]
+
         try:
             events = messages_client.stream_message(
                 self.user_id,
@@ -983,6 +1115,7 @@ class OmniaREPL:
                 model=self.model,
                 provider=self.provider,
                 user_settings=self.user_settings,
+                **extra,
             )
             run_stream(events, model=self.model)
         except OmniaAPIError as exc:

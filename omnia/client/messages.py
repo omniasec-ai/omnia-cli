@@ -42,13 +42,14 @@ def _build_payload(
     native_tools: Optional[list] = None,
     knowledges: Optional[list] = None,
     skill_ids: Optional[list] = None,
+    agent_launch_id: Optional[str] = None,
     additional_info: str = "",
     streaming: bool = True,
     user_settings: Optional[dict] = None,
 ) -> dict:
     _model = model or settings.default_model
     _provider = provider or settings.default_provider
-    return {
+    payload = {
         "query": query,
         "user_id": user_id,
         "project_id": project_id,
@@ -68,6 +69,9 @@ def _build_payload(
             "user_settings": user_settings or {},
         },
     }
+    if agent_launch_id:
+        payload["agent_launch_id"] = agent_launch_id
+    return payload
 
 
 def stream_message(
