@@ -35,7 +35,7 @@ def _unwrap_content(content: str) -> str:
     return content
 
 
-def render_message(msg: dict) -> None:
+def render_message(msg: dict, model: str = "") -> None:
     """Dispatch a stored message dict to the correct renderer."""
     component_type = msg.get("component_type", "assistant")
     content = _unwrap_content(msg.get("content", ""))
@@ -43,7 +43,7 @@ def render_message(msg: dict) -> None:
     if component_type == "user":
         _render_user(content)
     elif component_type in ("assistant", "report"):
-        _render_assistant(content)
+        _render_assistant(content, model=model)
     elif component_type == "thinking":
         _render_thinking(content)
     elif component_type in ("file", "context_file"):
@@ -68,9 +68,10 @@ def _render_user(content: str) -> None:
     console.print(f"\n[bold green]You[/bold green]  {content}")
 
 
-def _render_assistant(content: str) -> None:
+def _render_assistant(content: str, model: str = "") -> None:
+    model_hint = f" [dim]({model})[/dim]" if model else ""
     console.print()
-    console.print("[bold blue]Omnia[/bold blue]")
+    console.print(f"[bold blue]Omnia[/bold blue]{model_hint}")
     if _has_custom_tags(content):
         pos = 0
         for m in _RE_TAGS.finditer(content):

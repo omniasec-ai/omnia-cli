@@ -19,7 +19,7 @@ from omnia.ui.messages import render_streaming_chunk
 console = Console()
 
 
-def run_stream(events: Iterator[dict]) -> str:
+def run_stream(events: Iterator[dict], model: str = "") -> str:
     """
     Consume SSE events from `events` and render them to the terminal
     in real time.  Returns the full accumulated text.
@@ -27,8 +27,9 @@ def run_stream(events: Iterator[dict]) -> str:
     buffer: list[str] = []
     current_type: str | None = None
 
+    model_hint = f" [dim]({model})[/dim]" if model else ""
     console.print()
-    console.print("[bold blue]Omnia[/bold blue]")
+    console.print(f"[bold blue]Omnia[/bold blue]{model_hint}")
 
     spinner = Spinner("dots2", text=Text(" thinking…", style="dim italic"), style="bold blue")
 
