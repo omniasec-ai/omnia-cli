@@ -36,7 +36,7 @@ COMMANDS THAT REQUIRE LOGIN
   /template fork <id>               Fork a template to your account
 
   /resources                        List resources in current chat
-  /upload <file>                    Upload a file as a resource
+  /analyze <file>                   Upload a file as a resource
 
   /newprovider                      Configure API key for a provider (shows configured/pending)
   /model [name]                     Show / change LLM model
@@ -139,7 +139,7 @@ _COMPLETIONS = [
     "/template show",
     "/template fork",
     "/resources",
-    "/upload",
+    "/analyze",
     "/newprovider",
     "/model",
     "/config",
@@ -150,7 +150,7 @@ _COMPLETIONS = [
 
 _PT_STYLE = Style.from_dict({"prompt": "ansicyan bold"})
 
-_PATH_COMMANDS = {"/analysis upload", "/upload"}
+_PATH_COMMANDS = {"/analysis upload", "/analyze"}
 
 
 class _OmniaCompleter(Completer):
@@ -619,7 +619,7 @@ class OmniaREPL:
                 self._require_auth()
                 self._require_chat()
                 self._cmd_resources()
-            elif cmd == "/upload":
+            elif cmd == "/analyze":
                 self._require_auth()
                 self._cmd_upload(args)
             elif cmd == "/newprovider":
@@ -1097,7 +1097,7 @@ class OmniaREPL:
 
     def _cmd_upload(self, args: list[str]) -> None:
         if not args:
-            console.print("[red]Usage: /upload <file>[/red]")
+            console.print("[red]Usage: /analyze <file>[/red]")
             return
         file_path = Path(args[0]).expanduser()
         if not file_path.exists():
