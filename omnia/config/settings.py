@@ -28,6 +28,11 @@ _ENV_URLS: dict[str, str] = {
     "dev": "http://localhost:8000",
 }
 
+_FRONTEND_URLS: dict[str, str] = {
+    "prod": "https://app.omniasec.ai",
+    "dev": "http://localhost:5173",
+}
+
 # Keys that the user is allowed to edit via /config set
 _USER_KEYS: dict[str, str] = {
     "default_model": "gemini-2.5-pro",
@@ -63,12 +68,18 @@ def _read_toml(path: Path) -> dict:
 
 def _resolve_api_url() -> str:
     """Determine the API base URL — never asks the user."""
-    # 1. Explicit env override (staging, custom deploys)
     if url := os.getenv("OMNIA_API_URL"):
         return url.rstrip("/")
-    # 2. Environment name
     env = os.getenv("OMNIA_ENV", "dev").lower()
     return _ENV_URLS.get(env, _ENV_URLS["dev"])
+
+
+def _resolve_frontend_url() -> str:
+    """Determine the frontend URL for browser-based auth."""
+    if url := os.getenv("OMNIA_FRONTEND_URL"):
+        return url.rstrip("/")
+    env = os.getenv("OMNIA_ENV", "dev").lower()
+    return _FRONTEND_URLS.get(env, _FRONTEND_URLS["dev"])
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +117,10 @@ class Settings:
     @property
     def api_url(self) -> str:
         return _resolve_api_url()
+
+    @property
+    def frontend_url(self) -> str:
+        return _resolve_frontend_url()
 
     # ------------------------------------------------------------------
     # api_key (user credential)
@@ -157,9 +172,7 @@ class Settings:
 
     def set(self, key: str, value: str) -> None:
         if key not in _USER_KEYS:
-            raise KeyError(
-                f"Unknown config key: {key!r}. Editable keys: {list(_USER_KEYS)}"
-            )
+            raise KeyError(f"Unknown config key: {key!r}. Editable keys: {list(_USER_KEYS)}")
         self._data[key] = value
 
 

@@ -47,14 +47,11 @@ def _auth_headers() -> dict[str, str]:
         raise NotConfiguredError("Not authenticated. Run /login first.")
 
     val = settings.api_key
-    # If it's just a hex/uuid string without a scheme, it's likely an incomplete API Key auth
+    # Raw hex key (no spaces) → X-API-Key header (new CLI key format)
     if " " not in val.strip():
-        # We can't fix it here without the user_id, but we can provide a better error
-        raise NotConfiguredError(
-            "Invalid API Key format. It should be 'Basic <base64>' or 'Bearer <token>'.\n"
-            "Try running /login again to re-authenticate with your User ID and API Key."
-        )
+        return {"X-API-Key": val}
 
+    # Legacy: "Basic <base64>" or "Bearer <token>"
     return {"Authorization": val}
 
 
