@@ -2,11 +2,8 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install dependencies
-COPY requirements.txt pyproject.toml ./
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Install the package
+# Install the package and its dependencies
+COPY pyproject.toml ./
 COPY omnia/ ./omnia/
 RUN pip install --no-cache-dir -e .
 
