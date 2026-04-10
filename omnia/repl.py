@@ -11,7 +11,7 @@ COMMANDS AVAILABLE WITHOUT LOGIN
 
 COMMANDS THAT REQUIRE LOGIN
 ────────────────────────────
-  /login                            Authenticate (browser or User ID + API Key)
+  /login                            Authenticate (browser or API Key)
   /logout                           Clear credentials
   /me                               Show current user
 
@@ -53,7 +53,6 @@ Any plain text (no leading /) is sent as a message to the current chat.
 
 from __future__ import annotations
 
-import base64
 import copy
 import getpass
 import os
@@ -387,7 +386,7 @@ def _login_method_picker() -> str | None:
     """
     options = [
         ("web", "Login with Web Browser  [recommended]"),
-        ("apikey", "Login with User ID + API Key"),
+        ("apikey", "Login with API Key"),
     ]
     cur = 0
 
@@ -805,12 +804,9 @@ class OmniaREPL:
             self._do_key_login(None)
 
     def _do_key_login(self, key: str | None) -> None:
-        """Authenticate with User ID + API Key (legacy / programmatic path)."""
+        """Authenticate with an API Key."""
         if not key:
-            user_id = Prompt.ask("User ID (UUID)")
-            api_key = _prompt_secret("API Key")
-            raw = f"{user_id}:{api_key}".encode()
-            key = f"Basic {base64.b64encode(raw).decode()}"
+            key = _prompt_secret("API Key")
 
         settings.api_key = key
 
