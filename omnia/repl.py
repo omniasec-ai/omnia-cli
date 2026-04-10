@@ -11,7 +11,7 @@ COMMANDS AVAILABLE WITHOUT LOGIN
 
 COMMANDS THAT REQUIRE LOGIN
 ────────────────────────────
-  /login                            Authenticate with your User ID and API Key
+  /login                            Authenticate (browser or User ID + API Key)
   /logout                           Clear credentials
   /me                               Show current user
 
@@ -58,10 +58,12 @@ import copy
 import getpass
 import os
 import select
+import socket
 import shlex
 import sys
 import termios
 import tty
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 
@@ -378,6 +380,57 @@ def _chat_picker(projects: list[dict], window: int = 5) -> dict | None:
         sys.stdout.flush()
 
 
+def _login_method_picker() -> str | None:
+    """
+    Two-option picker for login method.
+    Returns 'web', 'apikey', or None if cancelled (Esc / Ctrl-C / q).
+    """
+    options = [
+        ("web", "Login with Web Browser  [recommended]"),
+        ("apikey", "Login with User ID + API Key"),
+    ]
+    cur = 0
+
+    def _render(first: bool = False) -> None:
+        if not first:
+            sys.stdout.write(f"\x1b[{len(options)}A")
+        for i, (_, label) in enumerate(options):
+            if i == cur:
+                sys.stdout.write(f"\x1b[2K\r\x1b[1;36m❯ {label}\x1b[0m\n")
+            else:
+                sys.stdout.write(f"\x1b[2K\r  {label}\n")
+        sys.stdout.flush()
+
+    sys.stdout.write("\n")
+    _render(first=True)
+
+    fd = sys.stdin.fileno()
+    old_attrs = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        while True:
+            ch = os.read(fd, 1)
+            if ch in (b"\x03", b"q"):
+                return None
+            elif ch in (b"\r", b"\n"):
+                return options[cur][0]
+            elif ch == b"\x1b":
+                r, _, _ = select.select([fd], [], [], 0.05)
+                if not r:
+                    return None  # lone Escape → cancel
+                rest = os.read(fd, 2)
+                if rest == b"[A":  # ↑
+                    cur = (cur - 1) % len(options)
+                    _render()
+                elif rest == b"[B":  # ↓
+                    cur = (cur + 1) % len(options)
+                    _render()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+
 # ---------------------------------------------------------------------------
 # Template variable helpers
 # ---------------------------------------------------------------------------
@@ -634,7 +687,17 @@ class OmniaREPL:
         except NotConfiguredError as exc:
             console.print(f"[yellow]{exc}[/yellow]")
         except OmniaAPIError as exc:
-            console.print(f"[bold red]API error {exc.status_code}:[/bold red] {exc.detail}")
+            if exc.status_code == 401:
+                settings.api_key = ""
+                settings.save()
+                self.user_info = None
+                console.print(
+                    "\n[bold red]Session expired.[/bold red] "
+                    "Your API key is no longer valid (it may have been deleted).\n"
+                    "Run [bold cyan]/login[/bold cyan] to authenticate again."
+                )
+            else:
+                console.print(f"[bold red]API error {exc.status_code}:[/bold red] {exc.detail}")
         except Exception as exc:
             console.print(f"[bold red]Error:[/bold red] {exc}")
 
@@ -659,6 +722,7 @@ class OmniaREPL:
             if not query:
                 console.print("[red]Usage: /market search <query>[/red]")
                 return
+            console.print()
             with console.status(f"[dim]Searching for [cyan]{query}[/cyan]…[/dim]"):
                 data = public_client.search_market(query)
             _print_market_results(data)
@@ -669,6 +733,7 @@ class OmniaREPL:
                 return
             market, mid = rest[0], rest[1]
             version = rest[2] if len(rest) > 2 else ""
+            console.print()
             with console.status("[dim]Loading…[/dim]"):
                 data = public_client.get_market_package(market, mid, version)
             _print_market_package(data)
@@ -678,6 +743,7 @@ class OmniaREPL:
                 console.print("[red]Usage: /market versions <market> <id>[/red]")
                 return
             market, mid = rest[0], rest[1]
+            console.print()
             with console.status("[dim]Loading versions…[/dim]"):
                 data = public_client.get_market_package_versions(market, mid)
             _print_market_versions(data)
@@ -695,6 +761,7 @@ class OmniaREPL:
             console.print("[red]Usage: /share <token>[/red]")
             return
         token = args[0]
+        console.print()
         with console.status("[dim]Loading shared chat…[/dim]"):
             data = public_client.get_shared_chat(token)
         _print_shared_chat(data)
@@ -721,6 +788,24 @@ class OmniaREPL:
 
     def _cmd_login(self, args: list[str]) -> None:
         key = _flag(args, "--key")
+        if key:
+            # Programmatic / scripted login — skip picker
+            self._do_key_login(key)
+            return
+
+        console.print("[dim]Select login method:[/dim]")
+        method = _login_method_picker()
+        if method is None:
+            console.print("[dim]Cancelled.[/dim]")
+            return
+
+        if method == "web":
+            self._cmd_login_web()
+        else:
+            self._do_key_login(None)
+
+    def _do_key_login(self, key: str | None) -> None:
+        """Authenticate with User ID + API Key (legacy / programmatic path)."""
         if not key:
             user_id = Prompt.ask("User ID (UUID)")
             api_key = _prompt_secret("API Key")
@@ -729,10 +814,66 @@ class OmniaREPL:
 
         settings.api_key = key
 
+        console.print()
         with console.status("[dim]Verifying credentials…[/dim]"):
             data = auth_client.get_me()
 
         self.user_info = data.get("user_info", {})
+        try:
+            self.user_settings = auth_client.get_last_user_settings(self.user_id)
+        except Exception:
+            self.user_settings = {}
+        settings.save()
+
+        console.print(
+            Panel(
+                f"[bold green]Authenticated[/bold green] as "
+                f"[cyan]{self.user_info.get('email')}[/cyan]\n"
+                f"[dim]User ID:[/dim] {self.user_info.get('user_id')}\n"
+                f"[dim]Roles:[/dim]   {', '.join(self.user_info.get('roles', []))}",
+                title="Login successful",
+                border_style="green",
+                expand=False,
+            )
+        )
+
+    def _cmd_login_web(self) -> None:
+        """Authenticate via browser — opens /cli-auth, user copies the generated key."""
+        hostname = socket.gethostname()
+        auth_url = f"{settings.frontend_url}/cli-auth?hostname={hostname}"
+
+        console.print(
+            Panel(
+                f"[dim]Your browser will open automatically.[/dim]\n"
+                f"[dim]If it doesn't, copy and paste this URL:[/dim]\n\n"
+                f"  [cyan]{auth_url}[/cyan]\n\n"
+                f"[dim]Device:[/dim] [bold]{hostname}[/bold]\n"
+                f"[dim]Sign in and copy the CLI key shown in the browser.[/dim]",
+                title="Web Authentication",
+                border_style="cyan",
+                expand=False,
+            )
+        )
+
+        webbrowser.open(auth_url)
+
+        try:
+            key = _prompt_secret("Paste your CLI key here")
+        except KeyboardInterrupt:
+            console.print("\n[dim]Cancelled.[/dim]")
+            return
+
+        if not key:
+            console.print("[dim]Cancelled.[/dim]")
+            return
+
+        settings.api_key = key.strip()
+
+        console.print()
+        with console.status("[dim]Verifying credentials…[/dim]"):
+            me_data = auth_client.get_me()
+
+        self.user_info = me_data.get("user_info", {})
         try:
             self.user_settings = auth_client.get_last_user_settings(self.user_id)
         except Exception:
@@ -777,6 +918,7 @@ class OmniaREPL:
 
     def _cmd_new(self, args: list[str]) -> None:
         name = " ".join(args) if args else "New Chat"
+        console.print()
         with console.status(f"[dim]Creating chat…[/dim]"):
             project, chat = projects_client.create_project_with_chat(self.user_id, name)
         self.project = project
@@ -813,6 +955,7 @@ class OmniaREPL:
         )
 
     def _cmd_chats(self) -> None:
+        console.print()
         with console.status("[dim]Loading chats…[/dim]"):
             projects = projects_client.list_projects(self.user_id, limit=50)
 
@@ -832,6 +975,7 @@ class OmniaREPL:
             return
 
         project_id = chosen["id"]
+        console.print()
         with console.status("[dim]Loading…[/dim]"):
             chat = projects_client.get_or_create_chat(self.user_id, project_id)
 
@@ -839,6 +983,7 @@ class OmniaREPL:
         self.chat = chat
 
         # Show full history
+        console.print()
         with console.status("[dim]Loading history…[/dim]"):
             msgs = messages_client.list_messages(self.user_id, project_id, chat["id"])
 
@@ -854,6 +999,7 @@ class OmniaREPL:
             )
 
     def _cmd_workflow(self) -> None:
+        console.print()
         with console.status("[dim]Loading workflows…[/dim]"):
             all_templates = templates_client.list_templates(self.user_id)
 
@@ -877,6 +1023,7 @@ class OmniaREPL:
         t = chosen["_t"]
 
         # Fetch full template detail — the list endpoint may omit extracted_params
+        console.print()
         with console.status("[dim]Loading workflow…[/dim]"):
             detail = templates_client.get_template(self.user_id, t["id"])
         t = (
@@ -901,6 +1048,7 @@ class OmniaREPL:
 
         console.print(f"[dim]Launching[/dim] [bold]{t.get('title')}[/bold][dim]…[/dim]")
         try:
+            console.print()
             with console.status("[dim]Launching…[/dim]"):
                 messages_client.launch_workflow(
                     agent_name=agent["name"],
@@ -924,6 +1072,7 @@ class OmniaREPL:
     def _cmd_pick_template(self, template_type: str) -> None:
         label, sigil = _TEMPLATE_LABELS.get(template_type, (template_type.lower(), ""))
 
+        console.print()
         with console.status(f"[dim]Loading {label}s…[/dim]"):
             all_templates = templates_client.list_templates(self.user_id)
 
@@ -972,6 +1121,7 @@ class OmniaREPL:
         elif template_type == "PROMPT":
             if t:
                 # Fetch full detail so we have `prompt` text + `extracted_params`
+                console.print()
                 with console.status("[dim]Loading prompt…[/dim]"):
                     detail = templates_client.get_template(self.user_id, t["id"])
                 full = (
@@ -994,6 +1144,7 @@ class OmniaREPL:
             console.print(f"[dim]{label.capitalize()} cleared.[/dim]")
 
     def _cmd_history(self) -> None:
+        console.print()
         with console.status("[dim]Loading messages…[/dim]"):
             msgs = messages_client.list_messages(self.user_id, self.project["id"], self.chat["id"])
         if not msgs:
@@ -1019,6 +1170,7 @@ class OmniaREPL:
             if not file_path.exists():
                 console.print(f"[red]File not found: {rest[0]}[/red]")
                 return
+            console.print()
             with console.status(f"[dim]Uploading [cyan]{file_path.name}[/cyan]…[/dim]"):
                 result = analysis_client.upload_file(self.user_id, file_path)
             aid = result.get("analysis_id", result.get("id", ""))
@@ -1047,6 +1199,7 @@ class OmniaREPL:
         else:
             # List: requires auth
             self._require_auth()
+            console.print()
             with console.status("[dim]Loading…[/dim]"):
                 analyses = analysis_client.list_analyses(self.user_id)
             if analyses:
@@ -1077,6 +1230,7 @@ class OmniaREPL:
             console.print(f"[green]Forked.[/green] New ID: [cyan]{result.get('id')}[/cyan]")
 
         else:
+            console.print()
             with console.status("[dim]Loading…[/dim]"):
                 tmpls = templates_client.list_templates(self.user_id)
             if tmpls:
@@ -1106,6 +1260,7 @@ class OmniaREPL:
 
         if not self.project:
             # No active chat — fall back to standalone analysis upload
+            console.print()
             with console.status(
                 f"[dim]Uploading [cyan]{file_path.name}[/cyan] for analysis…[/dim]"
             ):
@@ -1118,10 +1273,12 @@ class OmniaREPL:
             return
 
         # In a chat: upload resource then run the FileAnalysisWorkflow
+        console.print()
         with console.status(f"[dim]Uploading [cyan]{file_path.name}[/cyan]…[/dim]"):
             resource = resources_client.upload_resource(self.user_id, self.project["id"], file_path)
         global_file_id = resource.get("global_file_id", "")
         chat_id = self.chat["id"] if self.chat else ""
+        console.print()
         with console.status("[dim]Running analysis…[/dim]"):
             result = workflows_client.run_file_analysis(
                 self.user_id, self.project["id"], global_file_id, chat_id
@@ -1208,6 +1365,7 @@ class OmniaREPL:
                         v["var_value"] = new_key
                 break
 
+        console.print()
         with console.status("[dim]Saving…[/dim]"):
             self.user_settings = auth_client.update_user_settings(self.user_id, updated_settings)
 
