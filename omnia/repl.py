@@ -57,8 +57,8 @@ import copy
 import getpass
 import os
 import select
-import socket
 import shlex
+import socket
 import sys
 import termios
 import tty
@@ -68,7 +68,7 @@ from pathlib import Path
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-from prompt_toolkit.completion import Completer, Completion, PathCompleter, WordCompleter
+from prompt_toolkit.completion import Completer, PathCompleter, WordCompleter
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
@@ -84,14 +84,13 @@ from omnia.client import messages as messages_client
 from omnia.client import projects as projects_client
 from omnia.client import public as public_client
 from omnia.client import resources as resources_client
-from omnia.client import workflows as workflows_client
 from omnia.client import templates as templates_client
+from omnia.client import workflows as workflows_client
 from omnia.client.base import NotConfiguredError, OmniaAPIError
 from omnia.config.settings import CONFIG_DIR, settings
 from omnia.ui.messages import render_message
 from omnia.ui.stream import run_stream
 from omnia.ui.tables import (
-    agents_table,
     analyses_table,
     resources_table,
     templates_table,
@@ -915,7 +914,7 @@ class OmniaREPL:
     def _cmd_new(self, args: list[str]) -> None:
         name = " ".join(args) if args else "New Chat"
         console.print()
-        with console.status(f"[dim]Creating chat…[/dim]"):
+        with console.status("[dim]Creating chat…[/dim]"):
             project, chat = projects_client.create_project_with_chat(self.user_id, name)
         self.project = project
         self.chat = chat
@@ -1415,7 +1414,7 @@ class OmniaREPL:
         env_name = os.getenv("OMNIA_ENV", "dev")
         explicit_url = os.getenv("OMNIA_API_URL", "")
         url_source = (
-            f"[dim](OMNIA_API_URL)[/dim]" if explicit_url else f"[dim](OMNIA_ENV={env_name})[/dim]"
+            "[dim](OMNIA_API_URL)[/dim]" if explicit_url else f"[dim](OMNIA_ENV={env_name})[/dim]"
         )
         _row(ct, "api_url", f"[cyan]{settings.api_url}[/cyan]  {url_source}")
         if settings.is_configured():

@@ -4,14 +4,9 @@ services:
     image: omnia-cli
     env_file:
       - .env
-    environment:
-      OMNIA_ENV: ${OMNIA_ENV}
-    # Mount host config dir so credentials persist between runs
     volumes:
       - ${HOME}/.omnia:/root/.omnia
       - ./omnia:/app/omnia
-    # Use host network so localhost resolves to the host machine (dev core/frontend)
     network_mode: host
-    # Keep stdin open for the interactive REPL
     stdin_open: true
     tty: true
