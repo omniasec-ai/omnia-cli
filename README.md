@@ -1,105 +1,84 @@
 # Omnia CLI
 
-Terminal client for the Omnia platform — chat, file analysis, templates and more.
-
-## Requirements
-
-- Docker + Docker Compose
+Terminal client for the Omnia platform — interactive REPL for chat, file analysis, templates, workflows and market intelligence.
 
 ## Setup
 
-1. Copy the env example and fill in your credentials:
+1. Copy the env example and fill in your API key:
 
 ```bash
 cp dotenv.example .env
 ```
 
 ```dotenv
-OMNIA_API_URL=https://your-omnia-api.example.com
 OMNIA_API_TOKEN=your_api_key_here
 ```
 
-2. Build the image:
+2. Run:
 
 ```bash
-docker compose build
-```
+# with Docker
+docker compose up --build
 
-## Usage
-
-```bash
-# Show available commands
-docker compose run --rm omnia omnia --help
-
-# Authenticate and verify credentials
-docker compose run --rm omnia omnia auth login
-
-# Start interactive chat (creates a new project)
-docker compose run --rm omnia omnia chat
-
-# Resume an existing project
-docker compose run --rm omnia omnia chat --project <project_id>
-
-# List projects
-docker compose run --rm omnia omnia project list
-
-# Upload a file for analysis
-docker compose run --rm -v $(pwd):/files omnia omnia analysis upload /files/sample.exe
-
-# List analyses
-docker compose run --rm omnia omnia analysis list
-
-# List templates
-docker compose run --rm omnia omnia template list
-```
-
-## Development
-
-Mount the source code for live reloading:
-
-```bash
-docker compose run --rm -v $(pwd)/omnia:/app/omnia omnia omnia chat
+# with Python (requires Python 3.11+)
+python3 -m venv venv
+source venv/bin/activate
+pip install -e .
+omnia
 ```
 
 ## Commands
 
-| Command | Description |
-|---|---|
-| `omnia auth login` | Set API URL + key, verify credentials |
-| `omnia auth logout` | Clear stored credentials |
-| `omnia auth whoami` | Show current user |
-| `omnia chat` | Start interactive streaming chat |
-| `omnia chat --project <id>` | Resume existing project |
-| `omnia chat --new <name>` | Create project and start chat |
-| `omnia project list` | List all projects |
-| `omnia project create <name>` | Create a new project |
-| `omnia project delete <id>` | Delete a project |
-| `omnia analysis upload <file>` | Upload file for analysis |
-| `omnia analysis upload <file> --watch` | Upload and poll until done |
-| `omnia analysis list` | List analyses |
-| `omnia analysis show <id>` | Show analysis detail |
-| `omnia template list` | List templates |
-| `omnia template show <id>` | Show template detail |
-| `omnia template fork <id>` | Fork a template |
-| `omnia config show` | Print current config |
-| `omnia config set <key> <value>` | Set a config value |
+Once inside the REPL, use these slash commands:
 
-### Chat REPL commands
-
-Inside `omnia chat`, type these slash commands:
+### No login required
 
 | Command | Description |
 |---|---|
-| `/help` | Show help |
+| `/version` | Check API version and connectivity |
+| `/market search <query>` | Search packages in market intelligence |
+| `/market show <market> <id>` | Show package details |
+| `/market versions <market> <id>` | List package versions |
+| `/share <token>` | View a shared chat by token |
+
+### Require login
+
+| Command | Description |
+|---|---|
+| `/login` | Authenticate (browser or API key) |
+| `/logout` | Clear credentials |
 | `/me` | Show current user |
-| `/agents` | List available agents |
-| `/projects` | List your projects |
-| `/chats` | List chats in current project |
-| `/history` | Print message history |
-| `/new <name>` | Create and switch to new project |
-| `/switch <project_id>` | Switch to existing project |
-| `/model <name>` | Change LLM model |
-| `/provider <name>` | Change provider |
-| `/upload <path>` | Upload file as project resource |
-| `/resources` | List project resources |
+| `/new <name>` | Create a new chat |
+| `/chats` | Pick a recent chat with arrow keys |
+| `/delete` | Delete the current chat |
+| `/leave` | Leave the current chat |
+| `/history` | Show this chat's message history |
+| `/agent` | Attach an agent to next messages |
+| `/knowledge` | Attach a knowledge base to next messages |
+| `/skill` | Attach a skill to next messages |
+| `/prompt` | Browse prompts and insert one into the conversation |
+| `/workflow` | Launch a workflow |
+| `/analysis` | List your file analyses |
+| `/analysis upload <file>` | Upload a file for analysis |
+| `/analysis show <id>` | Show analysis detail |
+| `/templates` | List available templates |
+| `/template show <id>` | Show template detail |
+| `/template fork <id>` | Fork a template to your account |
+| `/resources` | List resources in current chat |
+| `/analyze <file>` | Upload a file as a chat resource |
+| `/newprovider` | Configure API key for a provider |
+| `/model [name]` | Show or change the LLM model |
+| `/config` | Show current configuration |
+| `/help` | Show help |
+| `/clear` | Clear the screen |
 | `/exit` | Quit |
+
+Any plain text (no leading `/`) is sent as a message to the current chat.
+
+## Environment variables
+
+| Variable | Description | Default |
+|---|---|---|
+| `OMNIA_API_TOKEN` | Your API key | — |
+| `OMNIA_ENV` | `prod` or `dev` | `dev` |
+| `OMNIA_API_URL` | Explicit API URL override | — |
