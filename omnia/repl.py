@@ -539,6 +539,8 @@ class OmniaREPL:
             if self.selected_skill:
                 chips.append(f"/{_chip(self.selected_skill['title'])}")
             chip_str = "".join(f"[{c}]" for c in chips)
+            if self.chat:
+                return f"Chat {chip_str}>> "
             return f"{chip_str}>> " if chip_str else ">> "
         elif self.user_info:
             label = self.user_info.get("email", "omnia").split("@")[0]
