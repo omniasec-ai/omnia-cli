@@ -78,15 +78,7 @@ from rich.prompt import Prompt
 from rich.table import Table
 from rich.text import Text
 
-from omnia.client import analysis as analysis_client
-from omnia.client import auth as auth_client
-from omnia.client import messages as messages_client
-from omnia.client import projects as projects_client
-from omnia.client import public as public_client
-from omnia.client import resources as resources_client
-from omnia.client import templates as templates_client
-from omnia.client import workflows as workflows_client
-from omnia.client.base import NotConfiguredError, OmniaAPIError
+from omnia_sdk import OmniaClient, OmniaAPIError, NotConfiguredError
 from omnia.config.settings import CONFIG_DIR, settings
 from omnia.ui.messages import render_message
 from omnia.ui.stream import run_stream
@@ -97,6 +89,17 @@ from omnia.ui.tables import (
 )
 
 console = Console()
+
+
+def _client() -> OmniaClient:
+    """Return an OmniaClient configured from the current CLI settings."""
+    return OmniaClient(
+        api_key=settings.api_key,
+        api_url=settings.api_url,
+        default_model=settings.default_model,
+        default_provider=settings.default_provider,
+    )
+
 
 _BANNER = """\
 [bold cyan]
@@ -527,7 +530,9 @@ class OmniaREPL:
 
     @property
     def user_id(self) -> str | None:
-        return self.user_info.get("user_id") if self.user_info else None
+        if not self.user_info:
+            return None
+        return self.user_info.get("user_id") or self.user_info.get("id")
 
     def _prompt_text(self) -> str:
         if self.project:
@@ -708,7 +713,7 @@ class OmniaREPL:
     # ------------------------------------------------------------------
 
     def _cmd_version(self) -> None:
-        data = public_client.get_api_version()
+        data = _client().public.get_api_version()
         msg = data.get("message", "")
         version = data.get("core_version", "")
         console.print(f"[bold]{msg}[/bold]  [dim]v{version}[/dim]")
@@ -724,7 +729,7 @@ class OmniaREPL:
                 return
             console.print()
             with console.status(f"[dim]Searching for [cyan]{query}[/cyan]…[/dim]"):
-                data = public_client.search_market(query)
+                data = _client().public.search_market(query)
             _print_market_results(data)
 
         elif sub == "show":
@@ -735,7 +740,7 @@ class OmniaREPL:
             version = rest[2] if len(rest) > 2 else ""
             console.print()
             with console.status("[dim]Loading…[/dim]"):
-                data = public_client.get_market_package(market, mid, version)
+                data = _client().public.get_market_package(market, mid, version)
             _print_market_package(data)
 
         elif sub == "versions":
@@ -745,7 +750,7 @@ class OmniaREPL:
             market, mid = rest[0], rest[1]
             console.print()
             with console.status("[dim]Loading versions…[/dim]"):
-                data = public_client.get_market_package_versions(market, mid)
+                data = _client().public.get_market_package_versions(market, mid)
             _print_market_versions(data)
 
         else:
@@ -763,7 +768,7 @@ class OmniaREPL:
         token = args[0]
         console.print()
         with console.status("[dim]Loading shared chat…[/dim]"):
-            data = public_client.get_shared_chat(token)
+            data = _client().public.get_shared_chat(token)
         _print_shared_chat(data)
 
     # ------------------------------------------------------------------
@@ -772,11 +777,10 @@ class OmniaREPL:
 
     def _try_auto_login(self) -> None:
         try:
-            data = auth_client.get_me()
-            self.user_info = data.get("user_info", {})
+            self.user_info = _client().auth.get_me().model_dump(mode="json")
             email = self.user_info.get("email", "unknown")
             try:
-                self.user_settings = auth_client.get_last_user_settings(self.user_id)
+                self.user_settings = _client().auth.get_last_user_settings(self.user_id)
             except Exception:
                 self.user_settings = {}
             console.print(f"[dim]Logged in as[/dim] [bold cyan]{email}[/bold cyan]\n")
@@ -813,11 +817,10 @@ class OmniaREPL:
 
         console.print()
         with console.status("[dim]Verifying credentials…[/dim]"):
-            data = auth_client.get_me()
+            self.user_info = _client().auth.get_me().model_dump(mode="json")
 
-        self.user_info = data.get("user_info", {})
         try:
-            self.user_settings = auth_client.get_last_user_settings(self.user_id)
+            self.user_settings = _client().auth.get_last_user_settings(self.user_id)
         except Exception:
             self.user_settings = {}
         settings.save()
@@ -826,7 +829,7 @@ class OmniaREPL:
             Panel(
                 f"[bold green]Authenticated[/bold green] as "
                 f"[cyan]{self.user_info.get('email')}[/cyan]\n"
-                f"[dim]User ID:[/dim] {self.user_info.get('user_id')}\n"
+                f"[dim]User ID:[/dim] {self.user_id}\n"
                 f"[dim]Roles:[/dim]   {', '.join(self.user_info.get('roles', []))}",
                 title="Login successful",
                 border_style="green",
@@ -868,11 +871,10 @@ class OmniaREPL:
 
         console.print()
         with console.status("[dim]Verifying credentials…[/dim]"):
-            me_data = auth_client.get_me()
+            self.user_info = _client().auth.get_me().model_dump(mode="json")
 
-        self.user_info = me_data.get("user_info", {})
         try:
-            self.user_settings = auth_client.get_last_user_settings(self.user_id)
+            self.user_settings = _client().auth.get_last_user_settings(self.user_id)
         except Exception:
             self.user_settings = {}
         settings.save()
@@ -881,7 +883,7 @@ class OmniaREPL:
             Panel(
                 f"[bold green]Authenticated[/bold green] as "
                 f"[cyan]{self.user_info.get('email')}[/cyan]\n"
-                f"[dim]User ID:[/dim] {self.user_info.get('user_id')}\n"
+                f"[dim]User ID:[/dim] {self.user_id}\n"
                 f"[dim]Roles:[/dim]   {', '.join(self.user_info.get('roles', []))}",
                 title="Login successful",
                 border_style="green",
@@ -899,10 +901,9 @@ class OmniaREPL:
 
     def _cmd_me(self) -> None:
         # Refresh from API to get latest state
-        data = auth_client.get_me()
-        self.user_info = data.get("user_info", {})
+        self.user_info = _client().auth.get_me().model_dump(mode="json")
         t = Table(show_header=False, box=None, padding=(0, 2))
-        t.add_row("[dim]User ID[/dim]", self.user_info.get("user_id", ""))
+        t.add_row("[dim]User ID[/dim]", self.user_id or "")
         t.add_row("[dim]Email[/dim]", self.user_info.get("email", ""))
         t.add_row("[dim]Auth type[/dim]", self.user_info.get("auth_type", ""))
         t.add_row("[dim]Roles[/dim]", ", ".join(self.user_info.get("roles", [])))
@@ -917,9 +918,9 @@ class OmniaREPL:
         name = " ".join(args) if args else "New Chat"
         console.print()
         with console.status("[dim]Creating chat…[/dim]"):
-            project, chat = projects_client.create_project_with_chat(self.user_id, name)
-        self.project = project
-        self.chat = chat
+            p, c = _client().projects.create_project_with_chat(self.user_id, name)
+        self.project = p.model_dump(mode="json")
+        self.chat = c.model_dump(mode="json")
         console.print(
             "[green]New chat ready.[/green]  [dim]Start typing — it will be named automatically.[/dim]"
         )
@@ -934,7 +935,7 @@ class OmniaREPL:
         if confirm.lower() not in ("y", "yes"):
             console.print("[dim]Cancelled.[/dim]")
             return
-        projects_client.delete_project(self.user_id, pid)
+        _client().projects.delete_project(self.user_id, pid)
         self.project = None
         self.chat = None
         console.print(f"[green]Deleted[/green] [bold]{name}[/bold]")
@@ -954,7 +955,10 @@ class OmniaREPL:
     def _cmd_chats(self) -> None:
         console.print()
         with console.status("[dim]Loading chats…[/dim]"):
-            projects = projects_client.list_projects(self.user_id, limit=50)
+            projects = [
+                p.model_dump(mode="json")
+                for p in _client().projects.list_projects(self.user_id, limit=50)
+            ]
 
         if not projects:
             console.print("[yellow]No chats found.[/yellow]")
@@ -974,7 +978,11 @@ class OmniaREPL:
         project_id = chosen["id"]
         console.print()
         with console.status("[dim]Loading…[/dim]"):
-            chat = projects_client.get_or_create_chat(self.user_id, project_id)
+            chat = (
+                _client()
+                .projects.get_or_create_chat(self.user_id, project_id)
+                .model_dump(mode="json")
+            )
 
         self.project = chosen
         self.chat = chat
@@ -982,7 +990,10 @@ class OmniaREPL:
         # Show full history
         console.print()
         with console.status("[dim]Loading history…[/dim]"):
-            msgs = messages_client.list_messages(self.user_id, project_id, chat["id"])
+            msgs = [
+                m.model_dump(mode="json")
+                for m in _client().messages.list_messages(self.user_id, project_id, chat["id"])
+            ]
 
         if msgs:
             console.print()
@@ -998,7 +1009,9 @@ class OmniaREPL:
     def _cmd_workflow(self) -> None:
         console.print()
         with console.status("[dim]Loading workflows…[/dim]"):
-            all_templates = templates_client.list_templates(self.user_id)
+            all_templates = [
+                t.model_dump(mode="json") for t in _client().templates.list_templates(self.user_id)
+            ]
 
         workflows = [
             t
@@ -1022,19 +1035,14 @@ class OmniaREPL:
         # Fetch full template detail — the list endpoint may omit extracted_params
         console.print()
         with console.status("[dim]Loading workflow…[/dim]"):
-            detail = templates_client.get_template(self.user_id, t["id"])
-        t = (
-            detail.get("template", detail)
-            if isinstance(detail, dict) and "template" in detail
-            else detail
-        )
+            t = _client().templates.get_template(self.user_id, t["id"]).model_dump(mode="json")
 
         written_params = _collect_vars(t)
         if written_params is None:
             return  # user cancelled during var collection
 
         # Resolve the agent endpoint (mirrors frontend selectedAgentFromSettings)
-        agents = auth_client.get_agents()
+        agents = _client().auth.get_agents()
         agent = next(
             (a for a in agents if a.get("default_workflow_endpoint") and a.get("can_chat")),
             agents[0] if agents else None,
@@ -1047,7 +1055,7 @@ class OmniaREPL:
         try:
             console.print()
             with console.status("[dim]Launching…[/dim]"):
-                messages_client.launch_workflow(
+                _client().messages.launch_workflow(
                     agent_name=agent["name"],
                     workflow_endpoint=agent["default_workflow_endpoint"],
                     user_id=self.user_id,
@@ -1071,7 +1079,9 @@ class OmniaREPL:
 
         console.print()
         with console.status(f"[dim]Loading {label}s…[/dim]"):
-            all_templates = templates_client.list_templates(self.user_id)
+            all_templates = [
+                t.model_dump(mode="json") for t in _client().templates.list_templates(self.user_id)
+            ]
 
         templates = [
             t
@@ -1120,12 +1130,11 @@ class OmniaREPL:
                 # Fetch full detail so we have `prompt` text + `extracted_params`
                 console.print()
                 with console.status("[dim]Loading prompt…[/dim]"):
-                    detail = templates_client.get_template(self.user_id, t["id"])
-                full = (
-                    detail.get("template", detail)
-                    if isinstance(detail, dict) and "template" in detail
-                    else detail
-                )
+                    full = (
+                        _client()
+                        .templates.get_template(self.user_id, t["id"])
+                        .model_dump(mode="json")
+                    )
                 self._pending_input = _apply_template_vars(full)
                 if self._pending_input:
                     console.print(
@@ -1143,7 +1152,12 @@ class OmniaREPL:
     def _cmd_history(self) -> None:
         console.print()
         with console.status("[dim]Loading messages…[/dim]"):
-            msgs = messages_client.list_messages(self.user_id, self.project["id"], self.chat["id"])
+            msgs = [
+                m.model_dump(mode="json")
+                for m in _client().messages.list_messages(
+                    self.user_id, self.project["id"], self.chat["id"]
+                )
+            ]
         if not msgs:
             console.print("[dim]No messages yet.[/dim]")
             return
@@ -1169,8 +1183,10 @@ class OmniaREPL:
                 return
             console.print()
             with console.status(f"[dim]Uploading [cyan]{file_path.name}[/cyan]…[/dim]"):
-                result = analysis_client.upload_file(self.user_id, file_path)
-            aid = result.get("analysis_id", result.get("id", ""))
+                result = (
+                    _client().analysis.upload_file(self.user_id, file_path).model_dump(mode="json")
+                )
+            aid = result.get("analysis_id") or result.get("id", "")
             console.print(
                 f"[green]Uploaded.[/green] Analysis ID: [cyan]{aid}[/cyan]\n"
                 f"[dim]Use [bold]/analysis show {aid}[/bold] to check results.[/dim]"
@@ -1184,13 +1200,13 @@ class OmniaREPL:
             analysis = None
             if self.user_id:
                 try:
-                    analysis = analysis_client.get_analysis(rest[0])
+                    analysis = _client().analysis.get_analysis(rest[0]).model_dump(mode="json")
                 except OmniaAPIError as exc:
                     if exc.status_code not in (401, 403):
                         raise
             if analysis is None:
                 # Fallback to public endpoint
-                analysis = public_client.get_public_analysis(rest[0])
+                analysis = _client().public.get_public_analysis(rest[0])
             _print_analysis_detail(analysis)
 
         else:
@@ -1198,7 +1214,10 @@ class OmniaREPL:
             self._require_auth()
             console.print()
             with console.status("[dim]Loading…[/dim]"):
-                analyses = analysis_client.list_analyses(self.user_id)
+                analyses = [
+                    a.model_dump(mode="json")
+                    for a in _client().analysis.list_analyses(self.user_id)
+                ]
             if analyses:
                 console.print(analyses_table(analyses))
             else:
@@ -1216,20 +1235,25 @@ class OmniaREPL:
             if not rest:
                 console.print("[red]Usage: /template show <id>[/red]")
                 return
-            tmpl = templates_client.get_template(self.user_id, rest[0])
+            tmpl = _client().templates.get_template(self.user_id, rest[0]).model_dump(mode="json")
             _print_template_detail(tmpl)
 
         elif sub == "fork":
             if not rest:
                 console.print("[red]Usage: /template fork <id>[/red]")
                 return
-            result = templates_client.fork_template(self.user_id, rest[0])
+            result = (
+                _client().templates.fork_template(self.user_id, rest[0]).model_dump(mode="json")
+            )
             console.print(f"[green]Forked.[/green] New ID: [cyan]{result.get('id')}[/cyan]")
 
         else:
             console.print()
             with console.status("[dim]Loading…[/dim]"):
-                tmpls = templates_client.list_templates(self.user_id)
+                tmpls = [
+                    t.model_dump(mode="json")
+                    for t in _client().templates.list_templates(self.user_id)
+                ]
             if tmpls:
                 console.print(templates_table(tmpls))
             else:
@@ -1240,7 +1264,10 @@ class OmniaREPL:
     # ------------------------------------------------------------------
 
     def _cmd_resources(self) -> None:
-        resources = resources_client.list_resources(self.user_id, self.project["id"])
+        resources = [
+            r.model_dump(mode="json")
+            for r in _client().resources.list_resources(self.user_id, self.project["id"])
+        ]
         if resources:
             console.print(resources_table(resources))
         else:
@@ -1261,8 +1288,10 @@ class OmniaREPL:
             with console.status(
                 f"[dim]Uploading [cyan]{file_path.name}[/cyan] for analysis…[/dim]"
             ):
-                result = analysis_client.upload_file(self.user_id, file_path)
-            aid = result.get("analysis_id", result.get("id", ""))
+                result = (
+                    _client().analysis.upload_file(self.user_id, file_path).model_dump(mode="json")
+                )
+            aid = result.get("analysis_id") or result.get("id", "")
             console.print(
                 f"[green]Uploaded.[/green] Analysis ID: [cyan]{aid}[/cyan]\n"
                 f"[dim]Use [bold]/analysis show {aid}[/bold] to check results.[/dim]"
@@ -1272,12 +1301,16 @@ class OmniaREPL:
         # In a chat: upload resource then run the FileAnalysisWorkflow
         console.print()
         with console.status(f"[dim]Uploading [cyan]{file_path.name}[/cyan]…[/dim]"):
-            resource = resources_client.upload_resource(self.user_id, self.project["id"], file_path)
+            resource = (
+                _client()
+                .resources.upload_resource(self.user_id, self.project["id"], file_path)
+                .model_dump(mode="json")
+            )
         global_file_id = resource.get("global_file_id", "")
         chat_id = self.chat["id"] if self.chat else ""
         console.print()
         with console.status("[dim]Running analysis…[/dim]"):
-            result = workflows_client.run_file_analysis(
+            result = _client().workflows.run_file_analysis(
                 self.user_id, self.project["id"], global_file_id, chat_id
             )
         aid = result.get("analysis_id", "")
@@ -1364,7 +1397,7 @@ class OmniaREPL:
 
         console.print()
         with console.status("[dim]Saving…[/dim]"):
-            self.user_settings = auth_client.update_user_settings(self.user_id, updated_settings)
+            self.user_settings = _client().auth.update_user_settings(self.user_id, updated_settings)
 
         provider_name = provider.get("title", provider["internal_name"])
         if clearing:
@@ -1505,7 +1538,7 @@ class OmniaREPL:
             extra["skill_ids"] = [self.selected_skill["id"]]
 
         try:
-            events = messages_client.stream_message(
+            events = _client().messages.stream_message(
                 self.user_id,
                 self.project["id"],
                 self.chat["id"],
@@ -1524,7 +1557,11 @@ class OmniaREPL:
         # auto-renamed the project — refresh to pick up the new name.
         if was_new_chat:
             try:
-                updated = projects_client.get_project(self.user_id, self.project["id"])
+                updated = (
+                    _client()
+                    .projects.get_project(self.user_id, self.project["id"])
+                    .model_dump(mode="json")
+                )
                 if updated.get("name") and updated["name"] != "New Chat":
                     self.project = updated
                     console.print(f"[dim]Chat renamed to:[/dim] [bold]{updated['name']}[/bold]")

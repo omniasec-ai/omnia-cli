@@ -1,13 +1,8 @@
 """
-Persistent configuration stored at ~/.omnia/config.toml
+CLI configuration — persisted at ~/.omnia/config.toml.
 
-API URL is NOT user-configurable — it is resolved automatically:
-
-  OMNIA_ENV=prod  →  https://api.omniasec.ai     (production)
-  OMNIA_ENV=dev   →  http://localhost:8000         (default)
-  OMNIA_API_URL=… →  explicit override (staging / custom deploys)
-
-The only credential the user ever sets is their API key.
+Handles TOML read/write. No SDK imports — the CLI creates an OmniaClient
+from these values whenever it needs to make API calls.
 """
 
 from __future__ import annotations
@@ -33,7 +28,6 @@ _FRONTEND_URLS: dict[str, str] = {
     "dev": "http://localhost:5173",
 }
 
-# Keys that the user is allowed to edit via /config set
 _USER_KEYS: dict[str, str] = {
     "default_model": "gemini-2.5-pro",
     "default_provider": "google",
@@ -41,7 +35,7 @@ _USER_KEYS: dict[str, str] = {
 
 
 # ---------------------------------------------------------------------------
-# TOML helpers (no external dependency — manual flat serialiser)
+# TOML helpers
 # ---------------------------------------------------------------------------
 
 
@@ -66,64 +60,33 @@ def _read_toml(path: Path) -> dict:
         return tomllib.load(f)
 
 
-def _resolve_api_url() -> str:
-    """Determine the API base URL — never asks the user."""
-    if url := os.getenv("OMNIA_API_URL"):
-        return url.rstrip("/")
-    env = os.getenv("OMNIA_ENV", "dev").lower()
-    return _ENV_URLS.get(env, _ENV_URLS["dev"])
-
-
-def _resolve_frontend_url() -> str:
-    """Determine the frontend URL for browser-based auth."""
-    if url := os.getenv("OMNIA_FRONTEND_URL"):
-        return url.rstrip("/")
-    env = os.getenv("OMNIA_ENV", "dev").lower()
-    return _FRONTEND_URLS.get(env, _FRONTEND_URLS["dev"])
-
-
 # ---------------------------------------------------------------------------
-# Settings class
+# Settings
 # ---------------------------------------------------------------------------
 
 
-class Settings:
-    """Runtime configuration. api_url is read-only (resolved from env)."""
+class CLISettings:
+    """Manages CLI config (TOML persistence). No SDK dependency."""
 
     def __init__(self) -> None:
+        env = os.getenv("OMNIA_ENV", "prod").lower()
+        self._api_url: str = os.getenv("OMNIA_API_URL", _ENV_URLS.get(env, _ENV_URLS["prod"]))
+        self._frontend_url: str = _FRONTEND_URLS.get(env, _FRONTEND_URLS["prod"])
         self._data: dict = {**_USER_KEYS}
+        self._api_key: str = ""
         self._load()
 
     def _load(self) -> None:
-        # 1. Persisted file (only user-editable keys)
         file_cfg = _read_toml(CONFIG_FILE)
         self._data.update({k: v for k, v in file_cfg.items() if k in _USER_KEYS})
-
-        # 2. API key — env var overrides saved file
-        self._api_key: str = os.getenv("OMNIA_API_TOKEN", "")
-        if saved_key := file_cfg.get("api_key", ""):
-            if not self._api_key:  # env var takes priority
-                self._api_key = saved_key
+        self._api_key = os.getenv("OMNIA_API_TOKEN", "") or file_cfg.get("api_key", "")
 
     def save(self) -> None:
-        """Persist user-editable values + api_key to disk."""
         payload = {**self._data, "api_key": self._api_key}
         _write_toml(payload, CONFIG_FILE)
 
     # ------------------------------------------------------------------
-    # Read-only: api_url
-    # ------------------------------------------------------------------
-
-    @property
-    def api_url(self) -> str:
-        return _resolve_api_url()
-
-    @property
-    def frontend_url(self) -> str:
-        return _resolve_frontend_url()
-
-    # ------------------------------------------------------------------
-    # api_key (user credential)
+    # api_key
     # ------------------------------------------------------------------
 
     @property
@@ -133,6 +96,18 @@ class Settings:
     @api_key.setter
     def api_key(self, value: str) -> None:
         self._api_key = value
+
+    # ------------------------------------------------------------------
+    # Read-only URL properties (resolved once at startup from env)
+    # ------------------------------------------------------------------
+
+    @property
+    def api_url(self) -> str:
+        return self._api_url
+
+    @property
+    def frontend_url(self) -> str:
+        return self._frontend_url
 
     # ------------------------------------------------------------------
     # User-editable settings
@@ -161,20 +136,10 @@ class Settings:
     def is_configured(self) -> bool:
         return bool(self._api_key)
 
-    def as_dict(self) -> dict:
-        """Returns display-friendly config (api_url resolved, key masked)."""
-        return {
-            "api_url (env)": self.api_url,
-            "api_key": "***" if self._api_key else "(not set)",
-            "default_model": self.default_model,
-            "default_provider": self.default_provider,
-        }
-
     def set(self, key: str, value: str) -> None:
         if key not in _USER_KEYS:
             raise KeyError(f"Unknown config key: {key!r}. Editable keys: {list(_USER_KEYS)}")
-        self._data[key] = value
+        setattr(self, key, value)
 
 
-# Module-level singleton
-settings = Settings()
+settings = CLISettings()

@@ -9,10 +9,9 @@ description = "Omnia CLI — terminal client for the Omnia API"
 requires-python = ">=3.11"
 dependencies = [
     "rich>=13",
-    "httpx>=0.27",
-    "pydantic>=2",
     "prompt_toolkit>=3.0",
     "python-dotenv>=1.0",
+    "omnia-sdk-test>=0.1.2",
 ]
 
 [project.scripts]
