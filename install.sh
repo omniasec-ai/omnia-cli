@@ -29,9 +29,23 @@ esac
 
 ASSET="${BINARY_NAME}-${os}-${arch}"
 
+# ── Auth header (optional, needed for private repos) ─────────────────────────
+AUTH_HEADER=""
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  AUTH_HEADER="Authorization: token ${GITHUB_TOKEN}"
+fi
+
+_curl() {
+  if [ -n "$AUTH_HEADER" ]; then
+    curl -fsSL -H "$AUTH_HEADER" "$@"
+  else
+    curl -fsSL "$@"
+  fi
+}
+
 # ── Resolve latest release tag ────────────────────────────────────────────────
 echo "Fetching latest release..."
-TAG=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+TAG=$(_curl "https://api.github.com/repos/${REPO}/releases/latest" \
   | grep '"tag_name"' \
   | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
 
@@ -49,7 +63,16 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 echo "Downloading $ASSET..."
-curl -fsSL "$DOWNLOAD_URL" -o "$TMP_DIR/$BINARY_NAME"
+ASSET_ID=$(_curl "https://api.github.com/repos/${REPO}/releases/latest" \
+  | grep -A1 "\"${ASSET}\"" | grep '"id"' | grep -o '[0-9]*' | head -1)
+
+if [ -n "$ASSET_ID" ] && [ -n "$AUTH_HEADER" ]; then
+  curl -fsSL -L -H "$AUTH_HEADER" -H "Accept: application/octet-stream" \
+    "https://api.github.com/repos/${REPO}/releases/assets/${ASSET_ID}" \
+    -o "$TMP_DIR/$BINARY_NAME"
+else
+  curl -fsSL -L "$DOWNLOAD_URL" -o "$TMP_DIR/$BINARY_NAME"
+fi
 chmod +x "$TMP_DIR/$BINARY_NAME"
 
 # ── Install ───────────────────────────────────────────────────────────────────
@@ -67,4 +90,4 @@ if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
 fi
 
 echo ""
-echo "Run: omnia"
+exec "$INSTALL_DIR/$BINARY_NAME"
