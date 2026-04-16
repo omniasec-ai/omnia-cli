@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            os: linux
+            arch: amd64
+          - runner: macos-latest
+            os: macos
+            arch: arm64
+          - runner: macos-13
+            os: macos
+            arch: amd64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -e .
+          pip install pyinstaller
+
+      - name: Build binary
+        run: |
+          pyinstaller \
+            --onefile \
+            --name omnia \
+            --hidden-import omnia \
+            omnia/cli.py
+
+      - name: Rename binary
+        run: mv dist/omnia dist/omnia-${{ matrix.os }}-${{ matrix.arch }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: omnia-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/omnia-${{ matrix.os }}-${{ matrix.arch }}
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/omnia-linux-amd64
+            dist/omnia-macos-arm64
+            dist/omnia-macos-amd64
+            install.sh
+          generate_release_notes: true
