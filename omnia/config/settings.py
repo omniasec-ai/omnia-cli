@@ -20,11 +20,13 @@ CONFIG_FILE = CONFIG_DIR / "config.toml"
 
 _ENV_URLS: dict[str, str] = {
     "prod": "https://api.omniasec.ai",
+    "staging": "https://api.staging.omniasec.ai",
     "dev": "http://localhost:8000",
 }
 
 _FRONTEND_URLS: dict[str, str] = {
     "prod": "https://app.omniasec.ai",
+    "staging": "https://app.staging.omniasec.ai",
     "dev": "http://localhost:5173",
 }
 
