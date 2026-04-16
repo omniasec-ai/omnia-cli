@@ -14,15 +14,11 @@ cp dotenv.example .env
 OMNIA_API_TOKEN=your_api_key_here
 ```
 
-2. Run:
+2. Run (requires Python 3.11+):
 
 ```bash
-# with Docker
-docker compose up --build
-
-# with Python (requires Python 3.11+)
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
 omnia
 ```
@@ -80,5 +76,5 @@ Any plain text (no leading `/`) is sent as a message to the current chat.
 | Variable | Description | Default |
 |---|---|---|
 | `OMNIA_API_TOKEN` | Your API key | — |
-| `OMNIA_ENV` | `prod` or `dev` | `dev` |
+| `OMNIA_ENV` | `prod`, `staging` or `dev` | `dev` |
 | `OMNIA_API_URL` | Explicit API URL override | — |

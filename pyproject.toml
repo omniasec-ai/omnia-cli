@@ -11,7 +11,7 @@ dependencies = [
     "rich>=13",
     "prompt_toolkit>=3.0",
     "python-dotenv>=1.0",
-    "omnia-sdk-test>=0.1.2",
+    "omnia-sdk>=0.1.1",
 ]
 
 [project.scripts]

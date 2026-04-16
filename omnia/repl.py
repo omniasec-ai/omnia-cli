@@ -66,6 +66,7 @@ import webbrowser
 from datetime import datetime
 from pathlib import Path
 
+from omnia_sdk import NotConfiguredError, OmniaAPIError, OmniaClient
 from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.completion import Completer, PathCompleter, WordCompleter
@@ -78,7 +79,6 @@ from rich.prompt import Prompt
 from rich.table import Table
 from rich.text import Text
 
-from omnia_sdk import OmniaClient, OmniaAPIError, NotConfiguredError
 from omnia.config.settings import CONFIG_DIR, settings
 from omnia.ui.messages import render_message
 from omnia.ui.stream import run_stream
