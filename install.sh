@@ -100,4 +100,4 @@ if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
 fi
 
 echo ""
-exec "$INSTALL_DIR/$BINARY_NAME"
+exec "$INSTALL_DIR/$BINARY_NAME" < /dev/tty
