@@ -82,11 +82,21 @@ mv "$TMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
 echo ""
 echo "omnia installed to $INSTALL_DIR/$BINARY_NAME"
 
-# ── PATH hint ─────────────────────────────────────────────────────────────────
+# ── PATH ──────────────────────────────────────────────────────────────────────
 if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
-  echo ""
-  echo "Add $INSTALL_DIR to your PATH:"
-  echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc && source ~/.bashrc"
+  SHELL_RC=""
+  if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "${SHELL:-}")" = "zsh" ]; then
+    SHELL_RC="$HOME/.zshrc"
+  elif [ -n "${BASH_VERSION:-}" ] || [ "$(basename "${SHELL:-}")" = "bash" ]; then
+    SHELL_RC="$HOME/.bashrc"
+  fi
+
+  if [ -n "$SHELL_RC" ]; then
+    echo "" >> "$SHELL_RC"
+    echo "export PATH=\"$INSTALL_DIR:\$PATH\"" >> "$SHELL_RC"
+    export PATH="$INSTALL_DIR:$PATH"
+    echo "Added $INSTALL_DIR to PATH in $SHELL_RC"
+  fi
 fi
 
 echo ""
