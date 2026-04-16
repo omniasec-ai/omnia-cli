@@ -21,9 +21,6 @@ jobs:
           - runner: macos-latest
             os: macos
             arch: arm64
-          - runner: macos-13
-            os: macos
-            arch: amd64
 
     steps:
       - uses: actions/checkout@v4
@@ -74,6 +71,5 @@ jobs:
           files: |
             dist/omnia-linux-amd64
             dist/omnia-macos-arm64
-            dist/omnia-macos-amd64
             install.sh
           generate_release_notes: true
