@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -e
 
 REPO="omniasec-ai/omnia-cli"
 BINARY_NAME="omnia"
@@ -49,7 +49,10 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 echo "Downloading $ASSET..."
-curl -fsSL -L "$DOWNLOAD_URL" -o "$TMP_DIR/$BINARY_NAME"
+if ! curl -fsSL -L "$DOWNLOAD_URL" -o "$TMP_DIR/$BINARY_NAME"; then
+  echo "Download failed: $DOWNLOAD_URL"
+  exit 1
+fi
 chmod +x "$TMP_DIR/$BINARY_NAME"
 
 # ── Install ───────────────────────────────────────────────────────────────────
@@ -61,19 +64,16 @@ echo "omnia installed to $INSTALL_DIR/$BINARY_NAME"
 
 # ── PATH ──────────────────────────────────────────────────────────────────────
 if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
-  SHELL_RC=""
-  if [ -n "${ZSH_VERSION:-}" ] || [ "$(basename "${SHELL:-}")" = "zsh" ]; then
+  DETECTED_SHELL="$(basename "${SHELL:-bash}")"
+  if [ "$DETECTED_SHELL" = "zsh" ]; then
     SHELL_RC="$HOME/.zshrc"
-  elif [ -n "${BASH_VERSION:-}" ] || [ "$(basename "${SHELL:-}")" = "bash" ]; then
+  else
     SHELL_RC="$HOME/.bashrc"
   fi
-
-  if [ -n "$SHELL_RC" ]; then
-    echo "" >> "$SHELL_RC"
-    echo "export PATH=\"$INSTALL_DIR:\$PATH\"" >> "$SHELL_RC"
-    export PATH="$INSTALL_DIR:$PATH"
-    echo "Added $INSTALL_DIR to PATH in $SHELL_RC"
-  fi
+  echo "" >> "$SHELL_RC"
+  echo "export PATH=\"$INSTALL_DIR:\$PATH\"" >> "$SHELL_RC"
+  export PATH="$INSTALL_DIR:$PATH"
+  echo "Added $INSTALL_DIR to PATH in $SHELL_RC"
 fi
 
 echo ""
