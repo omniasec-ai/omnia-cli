@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnia-cli"
-version = "0.2.6"
+version = "0.2.7"
 description = "Omnia CLI — terminal client for the Omnia API"
 requires-python = ">=3.11"
 dependencies = [
