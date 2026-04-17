@@ -2,25 +2,29 @@
 
 Terminal client for the Omnia platform — interactive REPL for chat, file analysis, templates, workflows and market intelligence.
 
-## Setup
-
-1. Copy the env example and fill in your API key:
+## Installation
 
 ```bash
-cp dotenv.example .env
+curl -fsSL https://omniasec.ai/cli | bash
 ```
 
-```dotenv
-OMNIA_API_TOKEN=your_api_key_here
-```
+Then open a new terminal and run `omnia`.
 
-2. Run (requires Python 3.11+):
+## Development setup
+
+Requires Python 3.11+.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 omnia
+```
+
+To uninstall from the venv:
+
+```bash
+pip uninstall omnia-cli
 ```
 
 ## Commands
@@ -65,16 +69,28 @@ Once inside the REPL, use these slash commands:
 | `/newprovider` | Configure API key for a provider |
 | `/model [name]` | Show or change the LLM model |
 | `/config` | Show current configuration |
+| `/uninstall` | Remove omnia from this machine |
 | `/help` | Show help |
 | `/clear` | Clear the screen |
 | `/exit` | Quit |
 
 Any plain text (no leading `/`) is sent as a message to the current chat.
 
+## Releasing a new version
+
+Releases are triggered by pushing a git tag. The CI workflow builds standalone binaries for Linux (amd64) and macOS (arm64) using PyInstaller and publishes them as GitHub Release assets alongside `install.sh`.
+
+```bash
+git tag v0.2.7
+git push origin v0.2.7
+```
+
+That's it — the release and binaries are created automatically in ~5 minutes.
+
 ## Environment variables
 
 | Variable | Description | Default |
 |---|---|---|
 | `OMNIA_API_TOKEN` | Your API key | — |
-| `OMNIA_ENV` | `prod`, `staging` or `dev` | `dev` |
+| `OMNIA_ENV` | `prod`, `staging` or `dev` | `prod` |
 | `OMNIA_API_URL` | Explicit API URL override | — |
