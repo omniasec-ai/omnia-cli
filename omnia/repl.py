@@ -43,6 +43,7 @@ COMMANDS THAT REQUIRE LOGIN
 
   /config                           Show current configuration
 
+  /uninstall                        Remove omnia from this machine
 
   /help                             Show this help
   /clear                            Clear the screen
@@ -146,6 +147,7 @@ _COMPLETIONS = [
     "/newprovider",
     "/model",
     "/config",
+    "/uninstall",
     "/help",
     "/clear",
     "/exit",
@@ -681,6 +683,9 @@ class OmniaREPL:
                 self._cmd_model(args)
             elif cmd == "/config":
                 self._cmd_config(args)
+            elif cmd == "/uninstall":
+                if self._cmd_uninstall():
+                    return True
             else:
                 console.print(f"[red]Unknown command:[/red] {cmd}  (type [cyan]/help[/cyan])")
         except NotConfiguredError as exc:
@@ -1429,6 +1434,89 @@ class OmniaREPL:
             )
         else:
             console.print(f"[dim]Cancelled — model unchanged:[/dim] [bold]{self.model}[/bold]")
+
+    def _cmd_uninstall(self) -> bool:
+        """Remove the omnia binary, config dir, and PATH entry. Returns True to exit."""
+        import re
+        import shutil
+        import sys
+
+        # Resolve binary path: PyInstaller sets sys.frozen; otherwise use PATH lookup
+        if getattr(sys, "frozen", False):
+            binary = Path(sys.executable)
+        else:
+            found = shutil.which("omnia")
+            binary = Path(found) if found else None
+
+        config_dir = CONFIG_DIR  # ~/.omnia
+
+        # Detect which shell RC was modified
+        detected_shell = Path(os.environ.get("SHELL", "")).name or "bash"
+        shell_rc = Path.home() / (".zshrc" if detected_shell == "zsh" else ".bashrc")
+
+        console.print("\n[bold red]Uninstall omnia[/bold red]\n")
+        console.print("[dim]The following will be removed:[/dim]")
+        if binary and binary.exists():
+            console.print(f"  Binary:     [cyan]{binary}[/cyan]")
+        else:
+            console.print("  Binary:     [dim]not found (may already be removed)[/dim]")
+        console.print(
+            f"  Config dir: [cyan]{config_dir}[/cyan]  [dim](credentials, history, config)[/dim]"
+        )
+        if shell_rc.exists():
+            console.print(f"  PATH entry in [cyan]{shell_rc}[/cyan]")
+        console.print()
+
+        confirm = _prompt_default("Are you sure? [y/N]", "n")
+        if confirm.lower() not in ("y", "yes"):
+            console.print("[dim]Cancelled.[/dim]")
+            return False
+
+        errors: list[str] = []
+
+        # 1. Remove PATH line from shell RC
+        install_dir = str(binary.parent) if binary else str(Path.home() / ".local" / "bin")
+        if shell_rc.exists():
+            try:
+                original = shell_rc.read_text(encoding="utf-8")
+                # Match the exact line the installer adds
+                pattern = re.compile(
+                    r"^\s*export PATH=\"?" + re.escape(install_dir) + r"[:\$\"PATH]*\"\s*$",
+                    re.MULTILINE,
+                )
+                cleaned = pattern.sub("", original).strip() + "\n"
+                if cleaned != original:
+                    shell_rc.write_text(cleaned, encoding="utf-8")
+                    console.print(
+                        f"[green]✓[/green] Removed PATH entry from [cyan]{shell_rc}[/cyan]"
+                    )
+                else:
+                    console.print(f"[dim]No omnia PATH entry found in {shell_rc}[/dim]")
+            except Exception as exc:
+                errors.append(f"Could not update {shell_rc}: {exc}")
+
+        # 2. Remove config directory
+        if config_dir.exists():
+            try:
+                shutil.rmtree(config_dir)
+                console.print(f"[green]✓[/green] Removed config dir [cyan]{config_dir}[/cyan]")
+            except Exception as exc:
+                errors.append(f"Could not remove {config_dir}: {exc}")
+
+        # 3. Remove binary last (we're still running from it)
+        if binary and binary.exists():
+            try:
+                binary.unlink()
+                console.print(f"[green]✓[/green] Removed binary [cyan]{binary}[/cyan]")
+            except Exception as exc:
+                errors.append(f"Could not remove binary {binary}: {exc}")
+
+        if errors:
+            for err in errors:
+                console.print(f"[yellow]Warning:[/yellow] {err}")
+
+        console.print("\n[bold green]omnia uninstalled.[/bold green]  Goodbye.\n")
+        return True
 
     def _cmd_config(self, args: list[str]) -> None:
         import os
