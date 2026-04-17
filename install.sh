@@ -24,7 +24,7 @@ case "$ARCH" in
   *)
     echo "Unsupported architecture: $ARCH"
     exit 1
-    ;;
+
 esac
 
 ASSET="${BINARY_NAME}-${os}-${arch}"
@@ -77,4 +77,5 @@ if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
 fi
 
 echo ""
-exec "$INSTALL_DIR/$BINARY_NAME" < /dev/tty
+echo "Run 'omnia' to get started."
+echo "(Open a new terminal if the command is not found)"
