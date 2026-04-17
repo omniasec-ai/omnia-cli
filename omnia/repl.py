@@ -43,6 +43,7 @@ COMMANDS THAT REQUIRE LOGIN
 
   /config                           Show current configuration
 
+  /update                           Update omnia to the latest version
   /uninstall                        Remove omnia from this machine
 
   /help                             Show this help
@@ -80,7 +81,9 @@ from rich.prompt import Prompt
 from rich.table import Table
 from rich.text import Text
 
+from omnia import __version__
 from omnia.config.settings import CONFIG_DIR, settings
+from omnia.updater import check_for_update, do_update
 from omnia.ui.messages import render_message
 from omnia.ui.stream import run_stream
 from omnia.ui.tables import (
@@ -147,6 +150,7 @@ _COMPLETIONS = [
     "/newprovider",
     "/model",
     "/config",
+    "/update",
     "/uninstall",
     "/help",
     "/clear",
@@ -555,9 +559,20 @@ class OmniaREPL:
     # ------------------------------------------------------------------
 
     def run(self) -> None:
-        console.print(_BANNER)
+        import threading
 
-        console.print(f"[dim]Endpoint:[/dim] [cyan]{settings.api_url}[/cyan]\n")
+        console.print(_BANNER)
+        console.print(f"[dim]v{__version__}  ·  Endpoint:[/dim] [cyan]{settings.api_url}[/cyan]\n")
+
+        def _check_update():
+            latest = check_for_update()
+            if latest:
+                console.print(
+                    f"[dim]New version available:[/dim] [bold cyan]{latest}[/bold cyan]"
+                    "  [dim]— run [bold cyan]/update[/bold cyan] to upgrade[/dim]\n"
+                )
+
+        threading.Thread(target=_check_update, daemon=True).start()
 
         if settings.is_configured():
             self._try_auto_login()
@@ -683,6 +698,9 @@ class OmniaREPL:
                 self._cmd_model(args)
             elif cmd == "/config":
                 self._cmd_config(args)
+            elif cmd == "/update":
+                if self._cmd_update():
+                    return True
             elif cmd == "/uninstall":
                 if self._cmd_uninstall():
                     return True
@@ -1434,6 +1452,21 @@ class OmniaREPL:
             )
         else:
             console.print(f"[dim]Cancelled — model unchanged:[/dim] [bold]{self.model}[/bold]")
+
+    def _cmd_update(self) -> bool:
+        """Download and replace the binary with the latest release. Returns True to exit on success."""
+        console.print()
+        with console.status("[dim]Checking for updates…[/dim]"):
+            ok, msg = do_update()
+
+        if ok and "Updated to" in msg:
+            console.print(f"[bold green]✓[/bold green] {msg}")
+            return True
+        elif ok:
+            console.print(f"[dim]{msg}[/dim]")
+        else:
+            console.print(f"[bold red]Error:[/bold red] {msg}")
+        return False
 
     def _cmd_uninstall(self) -> bool:
         """Remove the omnia binary, config dir, and PATH entry. Returns True to exit."""

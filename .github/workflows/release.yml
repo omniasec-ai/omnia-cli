@@ -41,6 +41,7 @@ jobs:
             --name omnia \
             --hidden-import omnia \
             --copy-metadata omnia-sdk \
+            --copy-metadata omnia-cli \
             omnia/cli.py
 
       - name: Rename binary
