@@ -5,7 +5,7 @@ Terminal client for the Omnia platform — interactive REPL for chat, file analy
 ## Installation
 
 ```bash
-curl -fsSL https://omniasec.ai/cli | bash
+curl -fsSL https://omniasec.ai/cli-install | bash
 ```
 
 Then open a new terminal and run `omnia`.
